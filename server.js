@@ -3,23 +3,23 @@ const crypto = require("crypto");
 const axios = require("axios");
 
 const app = express();
+app.use(express.json());
+
 const PORT = process.env.PORT || 3000;
 
-// חובה: משתני סביבה ב-Railway
-const ZC_TERMINAL = process.env.ZC_TERMINAL;
-const ZC_PASSWORD = process.env.ZC_PASSWORD;
-const ZC_KEY = process.env.ZC_KEY;
-const BASE_URL = process.env.BASE_URL;
+// ENV
+const TERMINAL = process.env.ZC_TERMINAL;     // 0882016016
+const PASSWORD = process.env.ZC_PASSWORD;     // Z0882016016
+const KEY = process.env.ZC_KEY;              // c086...
+const BASE_URL = process.env.BASE_URL;       // https://hataboon-payment-production.up.railway.app
 
-// נקודת יצירת טוקן של Z-Credit (טסטים)
-const ZC_REQUEST_TOKEN_URL = "https://pci.zcredit.co.il/WebControl/RequestToken.aspx";
-
-function sha256Hex(str) {
-  return crypto.createHash("sha256").update(str, "utf8").digest("hex");
+function mustEnv(name, value) {
+  if (!value) throw new Error(`Missing env var: ${name}`);
 }
 
-// בונה חתימה (Signature) – לפי סדר שדות קבוע
-function buildSignature({ TerminalNumber, Password, OrderId, Amount, SuccessURL, CancelURL, NotifyURL }, key) {
+// חתימה (כמו שעבדת עד עכשיו - SHA256 hex)
+function createSignature({ TerminalNumber, Password, OrderId, Amount, SuccessURL, CancelURL, NotifyURL }) {
+  // אם ב-ZCredit החתימה דורשת סדר אחר – זה המקום היחיד שמשנים בו.
   const raw =
     String(TerminalNumber) +
     String(Password) +
@@ -28,100 +28,94 @@ function buildSignature({ TerminalNumber, Password, OrderId, Amount, SuccessURL,
     String(SuccessURL) +
     String(CancelURL) +
     String(NotifyURL) +
-    String(key);
+    String(KEY);
 
-  return sha256Hex(raw);
+  return crypto.createHash("sha256").update(raw, "utf8").digest("hex");
 }
 
 app.get("/", (req, res) => {
   res.send("Hataboon Payment Server Running 🚀");
 });
 
-// בדיקת משתני סביבה בקליק (לא חושף סודות)
+// בדיקה מהירה שיש ENV (לא חושף סיסמא/מפתח)
 app.get("/env-check", (req, res) => {
   res.json({
     ok: true,
     has: {
-      ZC_TERMINAL: !!ZC_TERMINAL,
-      ZC_PASSWORD: !!ZC_PASSWORD,
-      ZC_KEY: !!ZC_KEY,
-      BASE_URL: !!BASE_URL
-    }
+      ZC_TERMINAL: !!process.env.ZC_TERMINAL,
+      ZC_PASSWORD: !!process.env.ZC_PASSWORD,
+      ZC_KEY: !!process.env.ZC_KEY,
+      BASE_URL: !!process.env.BASE_URL,
+    },
   });
 });
 
-// יצירת תשלום
-// דוגמה: /create-payment?orderId=999&amount=12.00
+// יצירת טוקן תשלום
+// אפשר לקרוא כך:
+// /create-payment?orderId=999&amount=12.00
 app.get("/create-payment", async (req, res) => {
   try {
-    const orderId = req.query.orderId || "999";
-    const amount = req.query.amount || "12.00";
+    mustEnv("ZC_TERMINAL", TERMINAL);
+    mustEnv("ZC_PASSWORD", PASSWORD);
+    mustEnv("ZC_KEY", KEY);
+    mustEnv("BASE_URL", BASE_URL);
 
-    // בדיקות חובה כדי שלא תשלח בקשה בלי סיסמה (כמו שקורה לך עכשיו)
-    if (!ZC_TERMINAL || !ZC_PASSWORD || !ZC_KEY || !BASE_URL) {
-      return res.status(500).json({
-        ok: false,
-        error: "Missing env vars",
-        need: ["ZC_TERMINAL", "ZC_PASSWORD", "ZC_KEY", "BASE_URL"],
-        has: {
-          ZC_TERMINAL: !!ZC_TERMINAL,
-          ZC_PASSWORD: !!ZC_PASSWORD,
-          ZC_KEY: !!ZC_KEY,
-          BASE_URL: !!BASE_URL
-        }
-      });
-    }
+    const orderId = String(req.query.orderId || "999");
+    const amount = String(req.query.amount || "12.00");
 
     const payload = {
-      TerminalNumber: ZC_TERMINAL,
-      Password: ZC_PASSWORD,
-      OrderId: String(orderId),
-      Amount: String(amount),
+      TerminalNumber: TERMINAL,
+      Password: PASSWORD,
+      OrderId: orderId,
+      Amount: amount,
       SuccessURL: `${BASE_URL}/payment-success`,
       CancelURL: `${BASE_URL}/payment-cancel`,
-      NotifyURL: `${BASE_URL}/zc-callback`
+      NotifyURL: `${BASE_URL}/zc-callback`,
     };
 
-    payload.Signature = buildSignature(payload, ZC_KEY);
+    const Signature = createSignature(payload);
 
-    // חשוב: הרבה שירותי .aspx מצפים ל-form-urlencoded, לא JSON
-    const form = new URLSearchParams(payload);
-
-    const zcResp = await axios.post(ZC_REQUEST_TOKEN_URL, form.toString(), {
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
-      timeout: 20000
+    // חשוב: ASPX בדרך כלל מצפה ל-form-urlencoded, לא JSON
+    const form = new URLSearchParams({
+      ...payload,
+      Signature,
     });
+
+    const url = "https://pci.zcredit.co.il/webcontrol/RequestToken.aspx";
+
+    const resp = await axios.post(url, form.toString(), {
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      timeout: 20000,
+      validateStatus: () => true, // שלא יזרוק על 4xx/5xx, נחזיר את הטקסט כמו שהוא
+    });
+
+    // לא מחזירים Password ללקוח
+    const safeSent = { ...payload, Password: "[hidden]", Signature };
 
     res.json({
       ok: true,
-      sent: {
-        TerminalNumber: payload.TerminalNumber,
-        Password: "[hidden]",
-        OrderId: payload.OrderId,
-        Amount: payload.Amount,
-        SuccessURL: payload.SuccessURL,
-        CancelURL: payload.CancelURL,
-        NotifyURL: payload.NotifyURL,
-        Signature: payload.Signature
-      },
-      received: typeof zcResp.data === "string" ? zcResp.data : zcResp.data
+      sent: safeSent,
+      received: typeof resp.data === "string" ? resp.data : resp.data,
+      status: resp.status,
     });
-  } catch (err) {
-    res.status(500).json({
-      ok: false,
-      error: err.message,
-      details: err.response?.data || null
-    });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e.message });
   }
 });
 
-app.post("/zc-callback", express.urlencoded({ extended: false }), (req, res) => {
-  console.log("ZC CALLBACK:", req.body);
-  res.sendStatus(200);
+app.get("/payment-success", (req, res) => {
+  res.send("Payment Success ✅");
 });
 
-app.get("/payment-success", (req, res) => res.send("Payment Success ✅"));
-app.get("/payment-cancel", (req, res) => res.send("Payment Cancelled ❌"));
+app.get("/payment-cancel", (req, res) => {
+  res.send("Payment Cancelled ❌");
+});
+
+// ZCredit callback (אצלך זה NotifyURL)
+app.post("/zc-callback", (req, res) => {
+  console.log("ZC callback:", req.body);
+  res.sendStatus(200);
+});
 
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
