@@ -12,17 +12,25 @@ const BASE_URL = (process.env.BASE_URL || "").replace(/\/+$/, "");
 const ZC_CREATE_SESSION_URL =
   "https://pci.zcredit.co.il/webcheckout/api/WebCheckout/CreateSession/";
 
+// תראה שזה הקוד החדש רץ
+const APP_VERSION = "v3-total-unitprice-amount";
+
 function mustEnv(name, value) {
   if (!value) throw new Error(`Missing env var: ${name}`);
 }
 
 app.get("/", (req, res) => res.send("Hataboon Payment Server Running 🚀"));
 
+app.get("/version", (req, res) => {
+  res.json({ ok: true, version: APP_VERSION });
+});
+
 app.get("/env-check", (req, res) => {
   res.json({
     ok: true,
     has: { ZC_KEY: !!ZC_KEY, BASE_URL: !!BASE_URL },
     baseUrl: BASE_URL || null,
+    version: APP_VERSION
   });
 });
 
@@ -38,8 +46,6 @@ app.get("/create-session", async (req, res) => {
       return res.status(400).json({ ok: false, error: "Invalid amount" });
     }
 
-    // נעביר סכום גם כ-total וגם בפריט. (חלק מה-GWs מתעקשים על Total)
-    // וגם נשתמש בשמות שדות נפוצים: Amount / UnitPrice במקום Price.
     const payload = {
       Key: ZC_KEY,
       UniqueID: `order-${orderId}`,
@@ -49,7 +55,7 @@ app.get("/create-session", async (req, res) => {
       CancelUrl: `${BASE_URL}/payment-cancel`,
 
       Currency: "ILS",
-      Total: amountNum, // חשוב!
+      Total: amountNum,
 
       AdjustAmount: true,
       ShowCart: false,
@@ -58,17 +64,17 @@ app.get("/create-session", async (req, res) => {
         {
           Description: `הטאבון - תשלום להזמנה ${orderId}`,
           Quantity: 1,
-          UnitPrice: amountNum, // נסיון 1
-          Amount: amountNum,    // נסיון 2 (ליתר ביטחון)
-          Currency: "ILS",
-        },
-      ],
+          UnitPrice: amountNum,
+          Amount: amountNum,
+          Currency: "ILS"
+        }
+      ]
     };
 
     const resp = await axios.post(ZC_CREATE_SESSION_URL, payload, {
       headers: { "Content-Type": "application/json" },
       timeout: 20000,
-      validateStatus: () => true,
+      validateStatus: () => true
     });
 
     const data = resp.data;
@@ -78,20 +84,21 @@ app.get("/create-session", async (req, res) => {
     res.json({
       ok: true,
       status: resp.status,
+      version: APP_VERSION,
       sent: {
         Key: "[hidden]",
         UniqueID: payload.UniqueID,
         CallBackUrl: payload.CallBackUrl,
         SuccessUrl: payload.SuccessUrl,
         CancelUrl: payload.CancelUrl,
-        Total: payload.Total,
         Currency: payload.Currency,
+        Total: payload.Total,
         AdjustAmount: payload.AdjustAmount,
         ShowCart: payload.ShowCart,
-        CartItems: payload.CartItems,
+        CartItems: payload.CartItems
       },
       received: data,
-      SessionUrl: sessionUrl,
+      SessionUrl: sessionUrl
     });
   } catch (err) {
     res.status(500).json({ ok: false, error: err.message || String(err) });
@@ -101,7 +108,7 @@ app.get("/create-session", async (req, res) => {
 app.get("/payment-success", (req, res) => res.send("Payment Success ✅"));
 app.get("/payment-cancel", (req, res) => res.send("Payment Cancelled ❌"));
 
-app.post("/zc-callback", express.json(), (req, res) => {
+app.post("/zc-callback", (req, res) => {
   console.log("ZC CALLBACK:", req.body);
   res.sendStatus(200);
 });
