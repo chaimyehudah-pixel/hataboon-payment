@@ -1,0 +1,12 @@
+{
+  "name": "hataboon-payment",
+  "version": "1.0.0",
+  "description": "Hataboon Payment Server",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.18.2"
+  }
+}
