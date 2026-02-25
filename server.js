@@ -8,7 +8,7 @@ app.use(express.json({ limit: "2mb" }));
 // ====== CONFIG ======
 const BASE_URL = process.env.BASE_URL || ""; // e.g. https://hataboon-payment-production.up.railway.app
 const ZC_KEY = process.env.ZC_KEY || "";
-const SHEETS_WEBHOOK = process.env.SHEETS_WEBHOOK || ""; // optional: Google Apps Script webhook URL
+const SHEETS_WEBHOOK = process.env.SHEETS_WEBHOOK || ""; // optional later
 
 // ====== HELPERS ======
 async function postJson(url, data) {
@@ -26,13 +26,10 @@ async function postJson(url, data) {
 }
 
 function normalizeAmount(amountStr) {
-  const n = Number(amountStr);
+  // allow "43" or "43.00"
+  const n = Number(String(amountStr).trim().replace(",", "."));
   if (!Number.isFinite(n) || n <= 0) return null;
   return Math.round(n * 100) / 100;
-}
-
-function onlyDigits(s) {
-  return String(s || "").replace(/\D+/g, "");
 }
 
 function escapeHtml(s) {
@@ -44,16 +41,21 @@ function escapeHtml(s) {
     .replaceAll("'", "&#039;");
 }
 
+function onlyDigits(s) {
+  const d = String(s || "").replace(/\D/g, "");
+  return d.length ? d : "";
+}
+
 // ====== HOME ======
 app.get("/", (req, res) => {
   res.type("text").send("Hataboon Payment Server Running 🚀");
 });
 
 // ====== 1) PRE-PAY PAGE ======
-// URL format: /pay/325/63  => orderId=325, amount=63
+// URL format: /pay/325/63   => orderId=325, amount=63
 app.get("/pay/:orderId/:amount", (req, res) => {
   const orderIdRaw = req.params.orderId;
-  const orderId = onlyDigits(orderIdRaw);
+  const orderId = onlyDigits(orderIdRaw); // keep it clean (325)
   const amount = normalizeAmount(req.params.amount);
 
   if (!orderId) return res.status(400).type("text").send("Invalid orderId");
@@ -71,12 +73,9 @@ app.get("/pay/:orderId/:amount", (req, res) => {
     h1{margin:0 0 12px;font-size:20px}
     label{display:block;margin:12px 0 6px;font-weight:700}
     input{width:100%;padding:12px;border:1px solid #ddd;border-radius:10px;font-size:16px}
-    .row{display:flex;gap:12px}
-    .row>div{flex:1}
     .hint{color:#666;font-size:13px;margin-top:8px}
     button{width:100%;margin-top:16px;padding:14px;border:0;border-radius:12px;font-size:18px;font-weight:800;cursor:pointer}
     button{background:#0b5bd3;color:#fff}
-    .locked{background:#f2f3f6}
   </style>
 </head>
 <body>
@@ -84,19 +83,14 @@ app.get("/pay/:orderId/:amount", (req, res) => {
     <h1>תשלום להזמנה #${escapeHtml(orderId)}</h1>
 
     <form method="POST" action="/create-session">
-      <div class="row">
-        <div>
-          <label>מספר הזמנה</label>
-          <input class="locked" name="orderId" value="${escapeHtml(orderId)}" readonly />
-        </div>
-        <div>
-          <label>סכום לתשלום (₪)</label>
-          <input class="locked" name="amount" value="${escapeHtml(amount)}" readonly />
-        </div>
-      </div>
+      <!-- orderId locked (not editable) -->
+      <input type="hidden" name="orderId" value="${escapeHtml(orderId)}" />
+
+      <label>סכום לתשלום (₪)</label>
+      <input name="amount" value="${escapeHtml(amount)}" inputmode="decimal" required />
 
       <label>שם מלא</label>
-      <input name="name" placeholder="לדוגמה: חיים יהודה" required />
+      <input name="name" placeholder="לדוגמה: יהודה" required />
 
       <label>טלפון</label>
       <input name="phone" placeholder="05XXXXXXXX" required />
@@ -130,11 +124,9 @@ app.post("/create-session", async (req, res) => {
     if (!orderId) return res.status(400).type("text").send("Invalid orderId");
     if (!amount) return res.status(400).type("text").send("Invalid amount");
 
-    // UniqueID: keep unique per order (digits ok)
-    const uniqueId = `order-${orderId}`;
+    // Unique per click (so same link can be paid many times safely)
+    const uniqueId = `order-${orderId}-${Date.now()}`;
 
-    // IMPORTANT CHANGE:
-    // "AdditionalText" must be AlphaNumeric -> we send ONLY the order number (digits).
     const payload = {
       Key: ZC_KEY,
       UniqueID: uniqueId,
@@ -146,7 +138,8 @@ app.post("/create-session", async (req, res) => {
       AdjustAmount: true,
       ShowCart: false,
 
-      AdditionalText: orderId, // <-- this is what should appear as "מידע נוסף": 325
+      // IMPORTANT: "מידע נוסף" = ONLY order number digits
+      AdditionalText: String(orderId),
 
       Customer: {
         Email: email,
@@ -159,9 +152,10 @@ app.post("/create-session", async (req, res) => {
           Email: "optional",
         },
       },
+
       CartItems: [
         {
-          Description: `Hataboon payment order ${orderId}`, // keep English to avoid any strict parsing
+          Description: `תשלום להזמנה ${orderId}#`,
           Quantity: 1,
           UnitPrice: amount,
           Amount: amount,
@@ -195,7 +189,7 @@ app.post("/create-session", async (req, res) => {
   }
 });
 
-// ====== 3) CALLBACK FROM Z-CREDIT (store to Sheets) ======
+// ====== 3) CALLBACK FROM Z-CREDIT ======
 app.all("/zc-callback", async (req, res) => {
   try {
     console.log("========== ZC CALLBACK ==========");
@@ -206,6 +200,7 @@ app.all("/zc-callback", async (req, res) => {
     console.log("Body:", JSON.stringify(req.body, null, 2));
     console.log("=================================");
 
+    // optional later: push to sheets
     if (SHEETS_WEBHOOK) {
       const payload = {
         ts: new Date().toISOString(),
@@ -225,7 +220,7 @@ app.all("/zc-callback", async (req, res) => {
   }
 });
 
-// ====== 4) SUCCESS / CANCEL PAGES ======
+// ====== 4) SUCCESS / CANCEL ======
 app.get("/payment-success", (req, res) => {
   const orderId = req.query.orderId || "";
   res.type("text").send(`Payment Success ✅\nOrder: ${orderId}`);
