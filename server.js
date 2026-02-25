@@ -19,12 +19,13 @@ async function postJson(url, data) {
   });
   const text = await res.text();
   let json = null;
-  try { json = JSON.parse(text); } catch {}
+  try {
+    json = JSON.parse(text);
+  } catch {}
   return { status: res.status, text, json };
 }
 
 function normalizeAmount(amountStr) {
-  // allow "43" or "43.00"
   const n = Number(amountStr);
   if (!Number.isFinite(n) || n <= 0) return null;
   return Math.round(n * 100) / 100;
@@ -42,6 +43,19 @@ function escapeHtml(s) {
 // ====== HOME ======
 app.get("/", (req, res) => {
   res.type("text").send("Hataboon Payment Server Running 🚀");
+});
+
+// ====== DEBUG: check env exists ======
+app.get("/env-check", (req, res) => {
+  res.json({
+    ok: true,
+    has: {
+      ZC_KEY: !!ZC_KEY,
+      BASE_URL: !!BASE_URL,
+      SHEETS_WEBHOOK: !!SHEETS_WEBHOOK,
+    },
+    baseUrl: BASE_URL || null,
+  });
 });
 
 // ====== 1) PRE-PAY PAGE (prefilled order+amount) ======
@@ -127,7 +141,7 @@ app.post("/create-session", async (req, res) => {
     // IMPORTANT: UniqueID must be unique per order
     const uniqueId = `order-${orderId}`;
 
-    // WebCheckout Create Session (based on what already worked for you)
+    // WebCheckout Create Session (works in your tests)
     const payload = {
       Key: ZC_KEY,
       UniqueID: uniqueId,
@@ -138,9 +152,6 @@ app.post("/create-session", async (req, res) => {
       Total: amount,
       AdjustAmount: true,
       ShowCart: false,
-      // “מידע נוסף” – תלוי בדיוק בשדה שה-API שלהם מצפה לו.
-      // פה אנחנו שמים את זה בתוך AdditionalText (אם אצלם זה השם הנכון זה יופיע).
-      AdditionalText: `מספר הזמנה: ${orderId}`,
       Customer: {
         Email: email,
         Name: name,
@@ -154,7 +165,7 @@ app.post("/create-session", async (req, res) => {
       },
       CartItems: [
         {
-          Description: `הטאבון - תשלום להזמנה ${orderId}`,
+          Description: `Hataboon order ${orderId}`, // keep alphanumeric to avoid issues
           Quantity: 1,
           UnitPrice: amount,
           Amount: amount,
@@ -173,7 +184,6 @@ app.post("/create-session", async (req, res) => {
       return res.status(502).type("text").send("Bad response from Z-Credit");
     }
 
-    // If success -> redirect to their SessionUrl
     const sessionUrl = json?.Data?.SessionUrl || json?.SessionUrl;
     const hasError = json?.HasError || json?.Data?.HasError;
 
@@ -182,7 +192,6 @@ app.post("/create-session", async (req, res) => {
       return res.status(400).type("json").send(json);
     }
 
-    // Redirect customer to Z-Credit checkout
     return res.redirect(sessionUrl);
   } catch (e) {
     console.error("create-session failed:", e);
@@ -201,7 +210,6 @@ app.all("/zc-callback", async (req, res) => {
     console.log("Body:", JSON.stringify(req.body, null, 2));
     console.log("=================================");
 
-    // If you have Google Sheets webhook, send it
     if (SHEETS_WEBHOOK) {
       const payload = {
         ts: new Date().toISOString(),
@@ -214,7 +222,6 @@ app.all("/zc-callback", async (req, res) => {
       console.log("Sheets webhook status:", r.status);
     }
 
-    // Always OK (so they don't fail)
     res.type("text").status(200).send("OK");
   } catch (e) {
     console.error("callback failed:", e);
