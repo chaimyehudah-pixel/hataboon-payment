@@ -1,236 +1,233 @@
 const express = require("express");
+const path = require("path");
 
 const app = express();
-app.set("trust proxy", true);
+
 app.use(express.urlencoded({ extended: true }));
-app.use(express.json({ limit: "2mb" }));
+app.use(express.json());
+app.use(express.static("public"));
 
-// ====== CONFIG ======
-const BASE_URL = process.env.BASE_URL || ""; // e.g. https://hataboon-payment-production.up.railway.app
-const ZC_KEY = process.env.ZC_KEY || "";
-const SHEETS_WEBHOOK = process.env.SHEETS_WEBHOOK || ""; // optional later
+const PORT = process.env.PORT || 3000;
 
-// ====== HELPERS ======
-async function postJson(url, data) {
-  const res = await fetch(url, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(data),
-  });
-  const text = await res.text();
-  let json = null;
-  try {
-    json = JSON.parse(text);
-  } catch {}
-  return { status: res.status, text, json };
-}
-
-function normalizeAmount(amountStr) {
-  // allow "43" or "43.00"
-  const n = Number(String(amountStr).trim().replace(",", "."));
-  if (!Number.isFinite(n) || n <= 0) return null;
-  return Math.round(n * 100) / 100;
-}
-
-function escapeHtml(s) {
-  return String(s)
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&#039;");
-}
-
-function onlyDigits(s) {
-  const d = String(s || "").replace(/\D/g, "");
-  return d.length ? d : "";
-}
+const BASE_URL = process.env.BASE_URL;
+const ZC_KEY = process.env.ZC_KEY;
 
 // ====== HOME ======
 app.get("/", (req, res) => {
-  res.type("text").send("Hataboon Payment Server Running 🚀");
+  res.send("Hataboon Payment Server Running 🍕");
 });
 
-// ====== 1) PRE-PAY PAGE ======
-// URL format: /pay/325/63   => orderId=325, amount=63
+// ====== PAYMENT PAGE ======
 app.get("/pay/:orderId/:amount", (req, res) => {
-  const orderIdRaw = req.params.orderId;
-  const orderId = onlyDigits(orderIdRaw); // keep it clean (325)
-  const amount = normalizeAmount(req.params.amount);
+  const orderId = req.params.orderId.replace(/\D/g, "");
+  const amount = Number(req.params.amount);
 
-  if (!orderId) return res.status(400).type("text").send("Invalid orderId");
-  if (!amount) return res.status(400).type("text").send("Invalid amount");
+  if (!orderId || !amount) {
+    return res.status(400).send("Invalid parameters");
+  }
 
-  const html = `<!doctype html>
+  const html = `
+<!doctype html>
 <html lang="he" dir="rtl">
 <head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>תשלום להזמנה ${escapeHtml(orderId)}</title>
-  <style>
-    body{font-family:Arial,Helvetica,sans-serif;background:#f6f7fb;margin:0;padding:24px}
-    .card{max-width:520px;margin:0 auto;background:#fff;border-radius:16px;padding:20px;box-shadow:0 6px 24px rgba(0,0,0,.08)}
-    h1{margin:0 0 12px;font-size:20px}
-    label{display:block;margin:12px 0 6px;font-weight:700}
-    input{width:100%;padding:12px;border:1px solid #ddd;border-radius:10px;font-size:16px}
-    .hint{color:#666;font-size:13px;margin-top:8px}
-    button{width:100%;margin-top:16px;padding:14px;border:0;border-radius:12px;font-size:18px;font-weight:800;cursor:pointer}
-    button{background:#0b5bd3;color:#fff}
-  </style>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>תשלום להזמנה ${orderId}</title>
+
+<style>
+body{
+  font-family:Arial,Helvetica,sans-serif;
+  background:linear-gradient(180deg,#f5f5f5,#e9e9e9);
+  margin:0;
+  padding:20px;
+}
+
+.card{
+  max-width:520px;
+  margin:50px auto;
+  background:#ffffff;
+  border-radius:20px;
+  padding:28px;
+  box-shadow:0 15px 40px rgba(0,0,0,.12);
+}
+
+.logo{
+  text-align:center;
+  margin-bottom:25px;
+}
+
+.logo img{
+  max-width:280px;
+  height:auto;
+}
+
+h1{
+  text-align:center;
+  margin:0 0 25px;
+  font-size:22px;
+  color:#222;
+}
+
+label{
+  display:block;
+  margin:14px 0 6px;
+  font-weight:700;
+  color:#333;
+}
+
+input{
+  width:100%;
+  padding:13px;
+  border:1px solid #ddd;
+  border-radius:12px;
+  font-size:16px;
+  direction:rtl;
+  text-align:right;
+  box-sizing:border-box;
+}
+
+input:focus{
+  border-color:#c40000;
+  outline:none;
+  box-shadow:0 0 0 2px rgba(196,0,0,0.15);
+}
+
+button{
+  width:100%;
+  margin-top:20px;
+  padding:15px;
+  border:0;
+  border-radius:14px;
+  font-size:18px;
+  font-weight:800;
+  cursor:pointer;
+  background:#c40000;
+  color:#fff;
+  transition:0.2s;
+}
+
+button:hover{
+  background:#a00000;
+}
+
+.footer-note{
+  text-align:center;
+  margin-top:12px;
+  font-size:13px;
+  color:#777;
+}
+</style>
 </head>
+
 <body>
-  <div class="card">
-    <h1>תשלום להזמנה #${escapeHtml(orderId)}</h1>
 
-    <form method="POST" action="/create-session">
-      <!-- orderId locked (not editable) -->
-      <input type="hidden" name="orderId" value="${escapeHtml(orderId)}" />
+<div class="card">
 
-      <label>סכום לתשלום (₪)</label>
-      <input name="amount" value="${escapeHtml(amount)}" inputmode="decimal" required />
+<div class="logo">
+  <img src="/logo.png" alt="הטאבון">
+</div>
 
-      <label>שם מלא</label>
-      <input name="name" placeholder="לדוגמה: יהודה" required />
+<h1>תשלום להזמנה #${orderId}</h1>
 
-      <label>טלפון</label>
-      <input name="phone" placeholder="05XXXXXXXX" required />
+<form method="POST" action="/create-session">
 
-      <label>אימייל</label>
-      <input type="email" name="email" placeholder="name@example.com" required />
+<input type="hidden" name="orderId" value="${orderId}" />
 
-      <div class="hint">לחיצה על “המשך לתשלום” תעביר אותך לעמוד תשלום מאובטח של Z-Credit.</div>
+<label>סכום לתשלום (₪)</label>
+<input name="amount" value="${amount}" required />
 
-      <button type="submit">המשך לתשלום</button>
-    </form>
-  </div>
+<label>שם מלא</label>
+<input name="name" required />
+
+<label>טלפון</label>
+<input name="phone" required />
+
+<label>אימייל</label>
+<input type="email" name="email" required />
+
+<button type="submit">המשך לתשלום</button>
+
+</form>
+
+<div class="footer-note">
+התשלום מתבצע באמצעות מערכת מאובטחת של Z-Credit
+</div>
+
+</div>
 </body>
-</html>`;
+</html>
+`;
 
-  res.type("html").send(html);
+  res.send(html);
 });
 
-// ====== 2) CREATE Z-CREDIT SESSION AND REDIRECT ======
+// ====== CREATE SESSION ======
 app.post("/create-session", async (req, res) => {
-  try {
-    if (!ZC_KEY) return res.status(500).type("text").send("Missing ZC_KEY");
-    if (!BASE_URL) return res.status(500).type("text").send("Missing BASE_URL");
+  const { orderId, amount, name, phone, email } = req.body;
 
-    const orderId = onlyDigits(req.body.orderId);
-    const amount = normalizeAmount(req.body.amount);
-    const name = String(req.body.name || "").trim();
-    const phone = String(req.body.phone || "").trim();
-    const email = String(req.body.email || "").trim();
+  const uniqueId = "order-" + orderId + "-" + Date.now();
 
-    if (!orderId) return res.status(400).type("text").send("Invalid orderId");
-    if (!amount) return res.status(400).type("text").send("Invalid amount");
-
-    // Unique per click (so same link can be paid many times safely)
-    const uniqueId = `order-${orderId}-${Date.now()}`;
-
-    const payload = {
-      Key: ZC_KEY,
-      UniqueID: uniqueId,
-      CallBackUrl: `${BASE_URL}/zc-callback`,
-      SuccessUrl: `${BASE_URL}/payment-success?orderId=${encodeURIComponent(orderId)}`,
-      CancelUrl: `${BASE_URL}/payment-cancel?orderId=${encodeURIComponent(orderId)}`,
-      Currency: "ILS",
-      Total: amount,
-      AdjustAmount: true,
-      ShowCart: false,
-
-      // IMPORTANT: "מידע נוסף" = ONLY order number digits
-      AdditionalText: String(orderId),
-
-      Customer: {
-        Email: email,
-        Name: name,
-        PhoneNumber: phone,
-        Attributes: {
-          HolderId: "optional",
-          Name: "optional",
-          PhoneNumber: "optional",
-          Email: "optional",
-        },
+  const payload = {
+    Key: ZC_KEY,
+    UniqueID: uniqueId,
+    CallBackUrl: BASE_URL + "/zc-callback",
+    SuccessUrl: BASE_URL + "/payment-success?orderId=" + orderId,
+    CancelUrl: BASE_URL + "/payment-cancel?orderId=" + orderId,
+    Currency: "ILS",
+    Total: Number(amount),
+    AdjustAmount: true,
+    ShowCart: false,
+    AdditionalText: orderId,
+    Customer: {
+      Email: email,
+      Name: name,
+      PhoneNumber: phone,
+    },
+    CartItems: [
+      {
+        Description: "תשלום להזמנה " + orderId,
+        Quantity: 1,
+        UnitPrice: Number(amount),
+        Amount: Number(amount),
+        Currency: "ILS",
       },
+    ],
+  };
 
-      CartItems: [
-        {
-          Description: `תשלום להזמנה ${orderId}#`,
-          Quantity: 1,
-          UnitPrice: amount,
-          Amount: amount,
-          Currency: "ILS",
-        },
-      ],
-    };
-
-    const { status, json, text } = await postJson(
-      "https://pci.zcredit.co.il/webcheckout/api/WebCheckout/CreateSession",
-      payload
-    );
-
-    if (!json) {
-      console.log("ZC RAW:", text);
-      return res.status(502).type("text").send("Bad response from Z-Credit");
+  const response = await fetch(
+    "https://pci.zcredit.co.il/webcheckout/api/WebCheckout/CreateSession",
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
     }
+  );
 
-    const sessionUrl = json?.Data?.SessionUrl || json?.SessionUrl;
-    const hasError = json?.HasError || json?.Data?.HasError;
+  const data = await response.json();
 
-    if (status !== 200 || hasError || !sessionUrl) {
-      console.log("ZC ERROR:", JSON.stringify(json, null, 2));
-      return res.status(400).type("json").send(json);
-    }
-
-    return res.redirect(sessionUrl);
-  } catch (e) {
-    console.error("create-session failed:", e);
-    res.status(500).type("text").send("Server error");
+  if (data?.Data?.SessionUrl) {
+    return res.redirect(data.Data.SessionUrl);
   }
+
+  res.send(data);
 });
 
-// ====== 3) CALLBACK FROM Z-CREDIT ======
-app.all("/zc-callback", async (req, res) => {
-  try {
-    console.log("========== ZC CALLBACK ==========");
-    console.log("Time:", new Date().toISOString());
-    console.log("Method:", req.method);
-    console.log("Headers:", JSON.stringify(req.headers, null, 2));
-    console.log("Query:", JSON.stringify(req.query, null, 2));
-    console.log("Body:", JSON.stringify(req.body, null, 2));
-    console.log("=================================");
-
-    // optional later: push to sheets
-    if (SHEETS_WEBHOOK) {
-      const payload = {
-        ts: new Date().toISOString(),
-        source: "zcredit-callback",
-        headers: req.headers,
-        query: req.query,
-        body: req.body,
-      };
-      const r = await postJson(SHEETS_WEBHOOK, payload);
-      console.log("Sheets webhook status:", r.status);
-    }
-
-    res.type("text").status(200).send("OK");
-  } catch (e) {
-    console.error("callback failed:", e);
-    res.type("text").status(200).send("OK");
-  }
+// ====== CALLBACK ======
+app.all("/zc-callback", (req, res) => {
+  console.log("ZC CALLBACK:", req.body);
+  res.send("OK");
 });
 
-// ====== 4) SUCCESS / CANCEL ======
+// ====== SUCCESS ======
 app.get("/payment-success", (req, res) => {
-  const orderId = req.query.orderId || "";
-  res.type("text").send(`Payment Success ✅\nOrder: ${orderId}`);
+  res.send("Payment Success ✅ Order: " + req.query.orderId);
 });
 
+// ====== CANCEL ======
 app.get("/payment-cancel", (req, res) => {
-  const orderId = req.query.orderId || "";
-  res.type("text").send(`Payment Cancel ❌\nOrder: ${orderId}`);
+  res.send("Payment Cancel ❌");
 });
 
-// ====== START ======
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log("Server listening on", PORT));
+app.listen(PORT, () => {
+  console.log("Server running on port", PORT);
+});
