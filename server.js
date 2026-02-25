@@ -31,6 +31,10 @@ function normalizeAmount(amountStr) {
   return Math.round(n * 100) / 100;
 }
 
+function onlyDigits(s) {
+  return String(s || "").replace(/\D+/g, "");
+}
+
 function escapeHtml(s) {
   return String(s)
     .replaceAll("&", "&amp;")
@@ -45,29 +49,17 @@ app.get("/", (req, res) => {
   res.type("text").send("Hataboon Payment Server Running 🚀");
 });
 
-// ====== DEBUG: check env exists ======
-app.get("/env-check", (req, res) => {
-  res.json({
-    ok: true,
-    has: {
-      ZC_KEY: !!ZC_KEY,
-      BASE_URL: !!BASE_URL,
-      SHEETS_WEBHOOK: !!SHEETS_WEBHOOK,
-    },
-    baseUrl: BASE_URL || null,
-  });
-});
-
-// ====== 1) PRE-PAY PAGE (prefilled order+amount) ======
-// URL format: /pay/200/10   => orderId=200, amount=10
+// ====== 1) PRE-PAY PAGE ======
+// URL format: /pay/325/63  => orderId=325, amount=63
 app.get("/pay/:orderId/:amount", (req, res) => {
-  const orderId = req.params.orderId;
+  const orderIdRaw = req.params.orderId;
+  const orderId = onlyDigits(orderIdRaw);
   const amount = normalizeAmount(req.params.amount);
 
+  if (!orderId) return res.status(400).type("text").send("Invalid orderId");
   if (!amount) return res.status(400).type("text").send("Invalid amount");
 
-  const html = `
-<!doctype html>
+  const html = `<!doctype html>
 <html lang="he" dir="rtl">
 <head>
   <meta charset="utf-8" />
@@ -118,8 +110,8 @@ app.get("/pay/:orderId/:amount", (req, res) => {
     </form>
   </div>
 </body>
-</html>
-`;
+</html>`;
+
   res.type("html").send(html);
 });
 
@@ -129,19 +121,20 @@ app.post("/create-session", async (req, res) => {
     if (!ZC_KEY) return res.status(500).type("text").send("Missing ZC_KEY");
     if (!BASE_URL) return res.status(500).type("text").send("Missing BASE_URL");
 
-    const orderId = String(req.body.orderId || "").trim();
+    const orderId = onlyDigits(req.body.orderId);
     const amount = normalizeAmount(req.body.amount);
     const name = String(req.body.name || "").trim();
     const phone = String(req.body.phone || "").trim();
     const email = String(req.body.email || "").trim();
 
-    if (!orderId) return res.status(400).type("text").send("Missing orderId");
+    if (!orderId) return res.status(400).type("text").send("Invalid orderId");
     if (!amount) return res.status(400).type("text").send("Invalid amount");
 
-    // IMPORTANT: UniqueID must be unique per order
+    // UniqueID: keep unique per order (digits ok)
     const uniqueId = `order-${orderId}`;
 
-    // WebCheckout Create Session (works in your tests)
+    // IMPORTANT CHANGE:
+    // "AdditionalText" must be AlphaNumeric -> we send ONLY the order number (digits).
     const payload = {
       Key: ZC_KEY,
       UniqueID: uniqueId,
@@ -152,6 +145,9 @@ app.post("/create-session", async (req, res) => {
       Total: amount,
       AdjustAmount: true,
       ShowCart: false,
+
+      AdditionalText: orderId, // <-- this is what should appear as "מידע נוסף": 325
+
       Customer: {
         Email: email,
         Name: name,
@@ -165,7 +161,7 @@ app.post("/create-session", async (req, res) => {
       },
       CartItems: [
         {
-          Description: `Hataboon order ${orderId}`, // keep alphanumeric to avoid issues
+          Description: `Hataboon payment order ${orderId}`, // keep English to avoid any strict parsing
           Quantity: 1,
           UnitPrice: amount,
           Amount: amount,
