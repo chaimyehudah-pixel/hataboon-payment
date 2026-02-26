@@ -11,6 +11,11 @@ const PORT = process.env.PORT || 3000;
 const BASE_URL = process.env.BASE_URL;
 const ZC_KEY = process.env.ZC_KEY;
 
+if (!BASE_URL || !ZC_KEY) {
+  console.error("Missing env vars. Please set BASE_URL and ZC_KEY in Railway Variables.");
+  process.exit(1);
+}
+
 // ====== HOME ======
 app.get("/", (req, res) => {
   res.send("Hataboon Payment Server Running 🍕");
@@ -18,10 +23,10 @@ app.get("/", (req, res) => {
 
 // ====== PAYMENT PAGE ======
 app.get("/pay/:orderId/:amount", (req, res) => {
-  const orderId = req.params.orderId.replace(/\D/g, "");
+  const orderId = String(req.params.orderId || "").replace(/\D/g, "");
   const amount = Number(req.params.amount);
 
-  if (!orderId || !amount) {
+  if (!orderId || !Number.isFinite(amount) || amount <= 0) {
     return res.status(400).send("Invalid parameters");
   }
 
@@ -34,6 +39,8 @@ app.get("/pay/:orderId/:amount", (req, res) => {
 <title id="pageTitle">תשלום להזמנה ${orderId}</title>
 
 <style>
+*{ box-sizing:border-box; }
+
 body{
   font-family:Arial,Helvetica,sans-serif;
   background:linear-gradient(180deg,#f5f5f5,#e9e9e9);
@@ -42,6 +49,7 @@ body{
 }
 
 .card{
+  position:relative;
   max-width:520px;
   margin:50px auto;
   background:#ffffff;
@@ -50,15 +58,11 @@ body{
   box-shadow:0 15px 40px rgba(0,0,0,.12);
 }
 
-/* כפתור שפה אחד */
-.topbar{
-  display:flex;
-  justify-content:flex-end;
-  align-items:center;
-  margin-bottom:10px;
-}
-
+/* כפתור שפה אחד - קבוע במקום (לא זז) */
 .lang-btn{
+  position:absolute;
+  top:16px;
+  left:16px;               /* תמיד אותו מקום */
   border:1px solid #ddd;
   background:#fff;
   border-radius:12px;
@@ -66,8 +70,14 @@ body{
   cursor:pointer;
   font-weight:800;
   font-size:14px;
-  color:#222;              /* חשוב כדי שיראו טקסט תמיד */
-  min-width:92px;          /* שלא יראה כמו ריבוע קטן */
+  color:#222;
+  min-width:92px;          /* שלא ישנה גודל */
+  height:40px;             /* שלא "יקפוץ" */
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  line-height:1;
+  user-select:none;
 }
 
 .lang-btn:hover{
@@ -75,9 +85,14 @@ body{
   box-shadow:0 0 0 2px rgba(196,0,0,0,0.10);
 }
 
+.lang-btn:focus{
+  outline:none;
+  box-shadow:0 0 0 2px rgba(196,0,0,0,0.10);
+}
+
 .logo{
   text-align:center;
-  margin-bottom:18px;
+  margin:6px 0 18px;
 }
 
 .logo img{
@@ -107,7 +122,6 @@ input{
   font-size:16px;
   direction:inherit;
   text-align:inherit;
-  box-sizing:border-box;
 }
 
 input:focus{
@@ -141,24 +155,23 @@ button.pay:hover{
   color:#777;
 }
 
-.ltr{
-  direction:ltr;
-  text-align:left;
-}
 .rtl{
   direction:rtl;
   text-align:right;
 }
+
+.ltr{
+  direction:ltr;
+  text-align:left;
+}
 </style>
 </head>
 
-<body>
+<body class="rtl">
 
 <div class="card">
 
-  <div class="topbar">
-    <button type="button" class="lang-btn" id="btnLang">English</button>
-  </div>
+  <button type="button" class="lang-btn" id="btnLang">English</button>
 
   <div class="logo">
     <img src="/logo.jpeg" alt="Hataboon Logo">
@@ -168,6 +181,7 @@ button.pay:hover{
 
   <form method="POST" action="/create-session">
     <input type="hidden" name="orderId" value="${orderId}" />
+    <input type="hidden" name="lang" id="langHidden" value="he" />
 
     <label id="lblAmount"></label>
     <input name="amount" value="${amount}" required />
@@ -226,9 +240,8 @@ function applyLang(code){
   document.documentElement.lang = t.lang;
   document.documentElement.dir = t.dir;
 
-  const isLtr = t.dir === "ltr";
-  document.body.classList.toggle("ltr", isLtr);
-  document.body.classList.toggle("rtl", !isLtr);
+  document.body.classList.toggle("ltr", t.dir === "ltr");
+  document.body.classList.toggle("rtl", t.dir !== "ltr");
 
   document.getElementById("title").textContent = t.title(orderId);
   document.getElementById("lblAmount").textContent = t.amount;
@@ -238,9 +251,9 @@ function applyLang(code){
   document.getElementById("btnPay").textContent = t.pay;
   document.getElementById("footer").textContent = t.footer;
   document.getElementById("pageTitle").textContent = t.pageTitle(orderId);
-
-  // כאן הכפתור תמיד מציג את "השפה השניה"
   document.getElementById("btnLang").textContent = t.toggleBtn;
+
+  document.getElementById("langHidden").value = code;
 
   localStorage.setItem("lang", code);
 }
@@ -253,8 +266,7 @@ function toggleLang(){
 
 document.getElementById("btnLang").addEventListener("click", toggleLang);
 
-const saved = localStorage.getItem("lang") || "he";
-applyLang(saved);
+applyLang(localStorage.getItem("lang") || "he");
 </script>
 
 </body>
@@ -266,64 +278,83 @@ applyLang(saved);
 
 // ====== CREATE SESSION ======
 app.post("/create-session", async (req, res) => {
-  const { orderId, amount, name, phone, email } = req.body;
+  try {
+    const { orderId, amount, name, phone, email, lang } = req.body;
 
-  const uniqueId = "order-" + orderId + "-" + Date.now();
+    const cleanOrderId = String(orderId || "").replace(/\D/g, "");
+    const total = Number(amount);
 
-  const payload = {
-    Key: ZC_KEY,
-    UniqueID: uniqueId,
-    CallBackUrl: BASE_URL + "/zc-callback",
-    SuccessUrl: BASE_URL + "/payment-success?orderId=" + orderId,
-    CancelUrl: BASE_URL + "/payment-cancel?orderId=" + orderId,
-    Currency: "ILS",
-    Total: Number(amount),
-    AdjustAmount: true,
-    ShowCart: false,
-    AdditionalText: orderId,
-    Customer: {
-      Email: email,
-      Name: name,
-      PhoneNumber: phone,
-    },
-    CartItems: [
-      {
-        Description: "Payment for order " + orderId,
-        Quantity: 1,
-        UnitPrice: Number(amount),
-        Amount: Number(amount),
-        Currency: "ILS",
-      },
-    ],
-  };
-
-  const response = await fetch(
-    "https://pci.zcredit.co.il/webcheckout/api/WebCheckout/CreateSession",
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
+    if (!cleanOrderId || !Number.isFinite(total) || total <= 0) {
+      return res.status(400).send("Invalid parameters");
     }
-  );
 
-  const data = await response.json();
+    const language = (lang === "en") ? "en" : "he";
 
-  if (data?.Data?.SessionUrl) {
-    return res.redirect(data.Data.SessionUrl);
+    const uniqueId = "order-" + cleanOrderId + "-" + Date.now();
+
+    const itemDesc =
+      language === "en"
+        ? "Payment for order " + cleanOrderId
+        : "תשלום להזמנה " + cleanOrderId;
+
+    const payload = {
+      Key: ZC_KEY,
+      UniqueID: uniqueId,
+      CallBackUrl: BASE_URL + "/zc-callback",
+      SuccessUrl: BASE_URL + "/payment-success?orderId=" + cleanOrderId,
+      CancelUrl: BASE_URL + "/payment-cancel?orderId=" + cleanOrderId,
+      Currency: "ILS",
+      Total: total,
+      AdjustAmount: true,
+      ShowCart: false,
+      AdditionalText: cleanOrderId,
+      Customer: {
+        Email: email,
+        Name: name,
+        PhoneNumber: phone,
+      },
+      CartItems: [
+        {
+          Description: itemDesc,
+          Quantity: 1,
+          UnitPrice: total,
+          Amount: total,
+          Currency: "ILS",
+        },
+      ],
+    };
+
+    const response = await fetch(
+      "https://pci.zcredit.co.il/webcheckout/api/WebCheckout/CreateSession",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      }
+    );
+
+    const data = await response.json();
+
+    if (data?.Data?.SessionUrl) {
+      return res.redirect(data.Data.SessionUrl);
+    }
+
+    res.status(400).send(data);
+  } catch (err) {
+    console.error("create-session error:", err);
+    res.status(500).send("Server error");
   }
-
-  res.send(data);
 });
 
 // ====== CALLBACK ======
 app.all("/zc-callback", (req, res) => {
-  console.log("ZC CALLBACK:", req.body);
+  console.log("ZC CALLBACK BODY:", req.body);
   res.send("OK");
 });
 
 // ====== SUCCESS ======
 app.get("/payment-success", (req, res) => {
-  res.send("Payment Success ✅ Order: " + req.query.orderId);
+  res.send("Payment Success ✅ Order: " + (req.query.orderId || ""));
 });
 
 // ====== CANCEL ======
