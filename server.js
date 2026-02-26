@@ -31,7 +31,7 @@ app.get("/pay/:orderId/:amount", (req, res) => {
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1" />
-<title data-i18n="pageTitle">תשלום להזמנה ${orderId}</title>
+<title id="pageTitle">תשלום להזמנה ${orderId}</title>
 
 <style>
 body{
@@ -50,11 +50,11 @@ body{
   box-shadow:0 15px 40px rgba(0,0,0,.12);
 }
 
+/* כפתור שפה אחד */
 .topbar{
   display:flex;
   justify-content:flex-end;
   align-items:center;
-  gap:10px;
   margin-bottom:10px;
 }
 
@@ -62,14 +62,17 @@ body{
   border:1px solid #ddd;
   background:#fff;
   border-radius:12px;
-  padding:8px 12px;
+  padding:10px 14px;
   cursor:pointer;
-  font-weight:700;
+  font-weight:800;
+  font-size:14px;
+  color:#222;              /* חשוב כדי שיראו טקסט תמיד */
+  min-width:92px;          /* שלא יראה כמו ריבוע קטן */
 }
 
-.lang-btn.active{
+.lang-btn:hover{
   border-color:#c40000;
-  box-shadow:0 0 0 2px rgba(196,0,0,0.10);
+  box-shadow:0 0 0 2px rgba(196,0,0,0,0.10);
 }
 
 .logo{
@@ -113,7 +116,7 @@ input:focus{
   box-shadow:0 0 0 2px rgba(196,0,0,0,0.15);
 }
 
-button{
+button.pay{
   width:100%;
   margin-top:20px;
   padding:15px;
@@ -127,7 +130,7 @@ button{
   transition:0.2s;
 }
 
-button:hover{
+button.pay:hover{
   background:#a00000;
 }
 
@@ -154,8 +157,7 @@ button:hover{
 <div class="card">
 
   <div class="topbar">
-    <button type="button" class="lang-btn" id="btnHe">עברית</button>
-    <button type="button" class="lang-btn" id="btnEn">English</button>
+    <button type="button" class="lang-btn" id="btnLang">English</button>
   </div>
 
   <div class="logo">
@@ -179,7 +181,7 @@ button:hover{
     <label id="lblEmail"></label>
     <input type="email" name="email" required />
 
-    <button type="submit" id="btnPay"></button>
+    <button class="pay" type="submit" id="btnPay"></button>
   </form>
 
   <div class="footer-note" id="footer"></div>
@@ -200,7 +202,8 @@ const dict = {
     email: "אימייל",
     pay: "המשך לתשלום",
     footer: "התשלום מתבצע באמצעות מערכת מאובטחת של Z-Credit",
-    pageTitle: (id) => "תשלום להזמנה " + id
+    pageTitle: (id) => "תשלום להזמנה " + id,
+    toggleBtn: "English"   // כשהדף בעברית -> הכפתור באנגלית
   },
   en: {
     lang: "en",
@@ -212,11 +215,12 @@ const dict = {
     email: "Email",
     pay: "Continue to payment",
     footer: "Payment is processed via Z-Credit secure system",
-    pageTitle: (id) => "Payment for Order " + id
+    pageTitle: (id) => "Payment for Order " + id,
+    toggleBtn: "עברית"     // כשהדף באנגלית -> הכפתור בעברית
   }
 };
 
-function setLang(code){
+function applyLang(code){
   const t = dict[code] || dict.he;
 
   document.documentElement.lang = t.lang;
@@ -233,23 +237,24 @@ function setLang(code){
   document.getElementById("lblEmail").textContent = t.email;
   document.getElementById("btnPay").textContent = t.pay;
   document.getElementById("footer").textContent = t.footer;
+  document.getElementById("pageTitle").textContent = t.pageTitle(orderId);
 
-  // title tag
-  const titleEl = document.querySelector("title[data-i18n='pageTitle']");
-  if (titleEl) titleEl.textContent = t.pageTitle(orderId);
-
-  // buttons active
-  document.getElementById("btnHe").classList.toggle("active", code === "he");
-  document.getElementById("btnEn").classList.toggle("active", code === "en");
+  // כאן הכפתור תמיד מציג את "השפה השניה"
+  document.getElementById("btnLang").textContent = t.toggleBtn;
 
   localStorage.setItem("lang", code);
 }
 
-document.getElementById("btnHe").addEventListener("click", () => setLang("he"));
-document.getElementById("btnEn").addEventListener("click", () => setLang("en"));
+function toggleLang(){
+  const current = localStorage.getItem("lang") || "he";
+  const next = current === "he" ? "en" : "he";
+  applyLang(next);
+}
+
+document.getElementById("btnLang").addEventListener("click", toggleLang);
 
 const saved = localStorage.getItem("lang") || "he";
-setLang(saved);
+applyLang(saved);
 </script>
 
 </body>
@@ -283,7 +288,7 @@ app.post("/create-session", async (req, res) => {
     },
     CartItems: [
       {
-        Description: "Payment for order " + orderId, // אם אתה רוצה גם עברית/אנגלית לפי שפה – אפשר לשדרג
+        Description: "Payment for order " + orderId,
         Quantity: 1,
         UnitPrice: Number(amount),
         Amount: Number(amount),
