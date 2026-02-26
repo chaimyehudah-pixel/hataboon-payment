@@ -1,5 +1,4 @@
 const express = require("express");
-const path = require("path");
 
 const app = express();
 
@@ -32,7 +31,7 @@ app.get("/pay/:orderId/:amount", (req, res) => {
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1" />
-<title>תשלום להזמנה ${orderId}</title>
+<title data-i18n="pageTitle">תשלום להזמנה ${orderId}</title>
 
 <style>
 body{
@@ -51,19 +50,41 @@ body{
   box-shadow:0 15px 40px rgba(0,0,0,.12);
 }
 
+.topbar{
+  display:flex;
+  justify-content:flex-end;
+  align-items:center;
+  gap:10px;
+  margin-bottom:10px;
+}
+
+.lang-btn{
+  border:1px solid #ddd;
+  background:#fff;
+  border-radius:12px;
+  padding:8px 12px;
+  cursor:pointer;
+  font-weight:700;
+}
+
+.lang-btn.active{
+  border-color:#c40000;
+  box-shadow:0 0 0 2px rgba(196,0,0,0.10);
+}
+
 .logo{
   text-align:center;
-  margin-bottom:25px;
+  margin-bottom:18px;
 }
 
 .logo img{
-  max-width:280px;
+  max-width:260px;
   height:auto;
 }
 
 h1{
   text-align:center;
-  margin:0 0 25px;
+  margin:0 0 20px;
   font-size:22px;
   color:#222;
 }
@@ -81,15 +102,15 @@ input{
   border:1px solid #ddd;
   border-radius:12px;
   font-size:16px;
-  direction:rtl;
-  text-align:right;
+  direction:inherit;
+  text-align:inherit;
   box-sizing:border-box;
 }
 
 input:focus{
   border-color:#c40000;
   outline:none;
-  box-shadow:0 0 0 2px rgba(196,0,0,0.15);
+  box-shadow:0 0 0 2px rgba(196,0,0,0,0.15);
 }
 
 button{
@@ -116,6 +137,15 @@ button:hover{
   font-size:13px;
   color:#777;
 }
+
+.ltr{
+  direction:ltr;
+  text-align:left;
+}
+.rtl{
+  direction:rtl;
+  text-align:right;
+}
 </style>
 </head>
 
@@ -123,37 +153,105 @@ button:hover{
 
 <div class="card">
 
-<div class="logo">
-  <img src="/logo.jpeg" alt="הטאבון">
+  <div class="topbar">
+    <button type="button" class="lang-btn" id="btnHe">עברית</button>
+    <button type="button" class="lang-btn" id="btnEn">English</button>
+  </div>
+
+  <div class="logo">
+    <img src="/logo.jpeg" alt="Hataboon Logo">
+  </div>
+
+  <h1 id="title"></h1>
+
+  <form method="POST" action="/create-session">
+    <input type="hidden" name="orderId" value="${orderId}" />
+
+    <label id="lblAmount"></label>
+    <input name="amount" value="${amount}" required />
+
+    <label id="lblName"></label>
+    <input name="name" required />
+
+    <label id="lblPhone"></label>
+    <input name="phone" required />
+
+    <label id="lblEmail"></label>
+    <input type="email" name="email" required />
+
+    <button type="submit" id="btnPay"></button>
+  </form>
+
+  <div class="footer-note" id="footer"></div>
+
 </div>
 
-<h1>תשלום להזמנה #${orderId}</h1>
+<script>
+const orderId = "${orderId}";
 
-<form method="POST" action="/create-session">
+const dict = {
+  he: {
+    lang: "he",
+    dir: "rtl",
+    title: (id) => "תשלום להזמנה #" + id,
+    amount: "סכום לתשלום (₪)",
+    name: "שם מלא",
+    phone: "טלפון",
+    email: "אימייל",
+    pay: "המשך לתשלום",
+    footer: "התשלום מתבצע באמצעות מערכת מאובטחת של Z-Credit",
+    pageTitle: (id) => "תשלום להזמנה " + id
+  },
+  en: {
+    lang: "en",
+    dir: "ltr",
+    title: (id) => "Payment for Order #" + id,
+    amount: "Amount (₪)",
+    name: "Full name",
+    phone: "Phone",
+    email: "Email",
+    pay: "Continue to payment",
+    footer: "Payment is processed via Z-Credit secure system",
+    pageTitle: (id) => "Payment for Order " + id
+  }
+};
 
-<input type="hidden" name="orderId" value="${orderId}" />
+function setLang(code){
+  const t = dict[code] || dict.he;
 
-<label>סכום לתשלום (₪)</label>
-<input name="amount" value="${amount}" required />
+  document.documentElement.lang = t.lang;
+  document.documentElement.dir = t.dir;
 
-<label>שם מלא</label>
-<input name="name" required />
+  const isLtr = t.dir === "ltr";
+  document.body.classList.toggle("ltr", isLtr);
+  document.body.classList.toggle("rtl", !isLtr);
 
-<label>טלפון</label>
-<input name="phone" required />
+  document.getElementById("title").textContent = t.title(orderId);
+  document.getElementById("lblAmount").textContent = t.amount;
+  document.getElementById("lblName").textContent = t.name;
+  document.getElementById("lblPhone").textContent = t.phone;
+  document.getElementById("lblEmail").textContent = t.email;
+  document.getElementById("btnPay").textContent = t.pay;
+  document.getElementById("footer").textContent = t.footer;
 
-<label>אימייל</label>
-<input type="email" name="email" required />
+  // title tag
+  const titleEl = document.querySelector("title[data-i18n='pageTitle']");
+  if (titleEl) titleEl.textContent = t.pageTitle(orderId);
 
-<button type="submit">המשך לתשלום</button>
+  // buttons active
+  document.getElementById("btnHe").classList.toggle("active", code === "he");
+  document.getElementById("btnEn").classList.toggle("active", code === "en");
 
-</form>
+  localStorage.setItem("lang", code);
+}
 
-<div class="footer-note">
-התשלום מתבצע באמצעות מערכת מאובטחת של Z-Credit
-</div>
+document.getElementById("btnHe").addEventListener("click", () => setLang("he"));
+document.getElementById("btnEn").addEventListener("click", () => setLang("en"));
 
-</div>
+const saved = localStorage.getItem("lang") || "he";
+setLang(saved);
+</script>
+
 </body>
 </html>
 `;
@@ -185,7 +283,7 @@ app.post("/create-session", async (req, res) => {
     },
     CartItems: [
       {
-        Description: "תשלום להזמנה " + orderId,
+        Description: "Payment for order " + orderId, // אם אתה רוצה גם עברית/אנגלית לפי שפה – אפשר לשדרג
         Quantity: 1,
         UnitPrice: Number(amount),
         Amount: Number(amount),
