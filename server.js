@@ -124,7 +124,7 @@ button:hover{
 <div class="card">
 
 <div class="logo">
-  <img src="/logo.png" alt="הטאבון">
+  <img src="/logo.jpeg" alt="הטאבון">
 </div>
 
 <h1>תשלום להזמנה #${orderId}</h1>
