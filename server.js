@@ -10,11 +10,8 @@ const PORT = process.env.PORT || 3000;
 
 const BASE_URL = process.env.BASE_URL;
 const ZC_KEY = process.env.ZC_KEY;
-
-if (!BASE_URL || !ZC_KEY) {
-  console.error("Missing env vars. Please set BASE_URL and ZC_KEY in Railway Variables.");
-  process.exit(1);
-}
+const ZC_TERMINAL = process.env.ZC_TERMINAL;
+const ZC_PASSWORD = process.env.ZC_PASSWORD;
 
 // ====== HOME ======
 app.get("/", (req, res) => {
@@ -39,8 +36,6 @@ app.get("/pay/:orderId/:amount", (req, res) => {
 <title id="pageTitle">תשלום להזמנה ${orderId}</title>
 
 <style>
-*{ box-sizing:border-box; }
-
 body{
   font-family:Arial,Helvetica,sans-serif;
   background:linear-gradient(180deg,#f5f5f5,#e9e9e9);
@@ -49,7 +44,6 @@ body{
 }
 
 .card{
-  position:relative;
   max-width:520px;
   margin:50px auto;
   background:#ffffff;
@@ -58,11 +52,16 @@ body{
   box-shadow:0 15px 40px rgba(0,0,0,.12);
 }
 
-/* כפתור שפה אחד - קבוע במקום (לא זז) */
+/* בר עליון */
+.topbar{
+  display:flex;
+  justify-content:flex-end;
+  align-items:center;
+  margin-bottom:10px;
+}
+
+/* כפתור שפה אחד - לא זז */
 .lang-btn{
-  position:absolute;
-  top:16px;
-  left:16px;               /* תמיד אותו מקום */
   border:1px solid #ddd;
   background:#fff;
   border-radius:12px;
@@ -71,30 +70,21 @@ body{
   font-weight:800;
   font-size:14px;
   color:#222;
-  min-width:92px;          /* שלא ישנה גודל */
-  height:40px;             /* שלא "יקפוץ" */
+  min-width:92px;
+  line-height:1;
   display:inline-flex;
   align-items:center;
   justify-content:center;
-  line-height:1;
-  user-select:none;
 }
-
 .lang-btn:hover{
   border-color:#c40000;
   box-shadow:0 0 0 2px rgba(196,0,0,0,0.10);
 }
 
-.lang-btn:focus{
-  outline:none;
-  box-shadow:0 0 0 2px rgba(196,0,0,0,0.10);
-}
-
 .logo{
   text-align:center;
-  margin:6px 0 18px;
+  margin-bottom:18px;
 }
-
 .logo img{
   max-width:260px;
   height:auto;
@@ -122,6 +112,7 @@ input{
   font-size:16px;
   direction:inherit;
   text-align:inherit;
+  box-sizing:border-box;
 }
 
 input:focus{
@@ -142,8 +133,8 @@ button.pay{
   background:#c40000;
   color:#fff;
   transition:0.2s;
+  line-height:1;
 }
-
 button.pay:hover{
   background:#a00000;
 }
@@ -155,23 +146,18 @@ button.pay:hover{
   color:#777;
 }
 
-.rtl{
-  direction:rtl;
-  text-align:right;
-}
-
-.ltr{
-  direction:ltr;
-  text-align:left;
-}
+.ltr{ direction:ltr; text-align:left; }
+.rtl{ direction:rtl; text-align:right; }
 </style>
 </head>
 
-<body class="rtl">
+<body>
 
 <div class="card">
 
-  <button type="button" class="lang-btn" id="btnLang">English</button>
+  <div class="topbar">
+    <button type="button" class="lang-btn" id="btnLang">English</button>
+  </div>
 
   <div class="logo">
     <img src="/logo.jpeg" alt="Hataboon Logo">
@@ -181,7 +167,6 @@ button.pay:hover{
 
   <form method="POST" action="/create-session">
     <input type="hidden" name="orderId" value="${orderId}" />
-    <input type="hidden" name="lang" id="langHidden" value="he" />
 
     <label id="lblAmount"></label>
     <input name="amount" value="${amount}" required />
@@ -217,7 +202,7 @@ const dict = {
     pay: "המשך לתשלום",
     footer: "התשלום מתבצע באמצעות מערכת מאובטחת של Z-Credit",
     pageTitle: (id) => "תשלום להזמנה " + id,
-    toggleBtn: "English"   // כשהדף בעברית -> הכפתור באנגלית
+    toggleBtn: "English"
   },
   en: {
     lang: "en",
@@ -230,7 +215,7 @@ const dict = {
     pay: "Continue to payment",
     footer: "Payment is processed via Z-Credit secure system",
     pageTitle: (id) => "Payment for Order " + id,
-    toggleBtn: "עברית"     // כשהדף באנגלית -> הכפתור בעברית
+    toggleBtn: "עברית"
   }
 };
 
@@ -240,8 +225,9 @@ function applyLang(code){
   document.documentElement.lang = t.lang;
   document.documentElement.dir = t.dir;
 
-  document.body.classList.toggle("ltr", t.dir === "ltr");
-  document.body.classList.toggle("rtl", t.dir !== "ltr");
+  const isLtr = t.dir === "ltr";
+  document.body.classList.toggle("ltr", isLtr);
+  document.body.classList.toggle("rtl", !isLtr);
 
   document.getElementById("title").textContent = t.title(orderId);
   document.getElementById("lblAmount").textContent = t.amount;
@@ -251,9 +237,9 @@ function applyLang(code){
   document.getElementById("btnPay").textContent = t.pay;
   document.getElementById("footer").textContent = t.footer;
   document.getElementById("pageTitle").textContent = t.pageTitle(orderId);
-  document.getElementById("btnLang").textContent = t.toggleBtn;
 
-  document.getElementById("langHidden").value = code;
+  // הכפתור תמיד מציג את השפה השניה
+  document.getElementById("btnLang").textContent = t.toggleBtn;
 
   localStorage.setItem("lang", code);
 }
@@ -266,7 +252,8 @@ function toggleLang(){
 
 document.getElementById("btnLang").addEventListener("click", toggleLang);
 
-applyLang(localStorage.getItem("lang") || "he");
+const saved = localStorage.getItem("lang") || "he";
+applyLang(saved);
 </script>
 
 </body>
@@ -279,43 +266,50 @@ applyLang(localStorage.getItem("lang") || "he");
 // ====== CREATE SESSION ======
 app.post("/create-session", async (req, res) => {
   try {
-    const { orderId, amount, name, phone, email, lang } = req.body;
+    if (!BASE_URL || !ZC_KEY || !ZC_TERMINAL || !ZC_PASSWORD) {
+      return res
+        .status(500)
+        .send("Missing env vars: BASE_URL / ZC_KEY / ZC_TERMINAL / ZC_PASSWORD");
+    }
+
+    const { orderId, amount, name, phone, email } = req.body;
 
     const cleanOrderId = String(orderId || "").replace(/\D/g, "");
     const total = Number(amount);
 
     if (!cleanOrderId || !Number.isFinite(total) || total <= 0) {
-      return res.status(400).send("Invalid parameters");
+      return res.status(400).send("Invalid form data");
     }
-
-    const language = (lang === "en") ? "en" : "he";
 
     const uniqueId = "order-" + cleanOrderId + "-" + Date.now();
 
-    const itemDesc =
-      language === "en"
-        ? "Payment for order " + cleanOrderId
-        : "תשלום להזמנה " + cleanOrderId;
-
+    // שים לב: אם Z-Credit דורשים שדות בשם אחר (TerminalNumber/Password וכו׳),
+    // נעדכן בהתאם לדוקומנטציה שלהם. כרגע שמתי TerminalNumber + Password בצורה נפוצה.
     const payload = {
       Key: ZC_KEY,
+      TerminalNumber: String(ZC_TERMINAL),
+      Password: String(ZC_PASSWORD),
+
       UniqueID: uniqueId,
       CallBackUrl: BASE_URL + "/zc-callback",
       SuccessUrl: BASE_URL + "/payment-success?orderId=" + cleanOrderId,
       CancelUrl: BASE_URL + "/payment-cancel?orderId=" + cleanOrderId,
+
       Currency: "ILS",
       Total: total,
       AdjustAmount: true,
       ShowCart: false,
       AdditionalText: cleanOrderId,
+
       Customer: {
         Email: email,
         Name: name,
         PhoneNumber: phone,
       },
+
       CartItems: [
         {
-          Description: itemDesc,
+          Description: "Payment for order " + cleanOrderId,
           Quantity: 1,
           UnitPrice: total,
           Amount: total,
@@ -339,16 +333,17 @@ app.post("/create-session", async (req, res) => {
       return res.redirect(data.Data.SessionUrl);
     }
 
-    res.status(400).send(data);
+    // אם יש שגיאה מה-API – נחזיר כדי שתראה מה בדיוק חסר
+    return res.status(400).json(data);
   } catch (err) {
     console.error("create-session error:", err);
-    res.status(500).send("Server error");
+    return res.status(500).send("Server error");
   }
 });
 
 // ====== CALLBACK ======
 app.all("/zc-callback", (req, res) => {
-  console.log("ZC CALLBACK BODY:", req.body);
+  console.log("ZC CALLBACK:", req.body);
   res.send("OK");
 });
 
