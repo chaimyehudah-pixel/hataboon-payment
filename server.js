@@ -10,6 +10,8 @@ const PORT = process.env.PORT || 3000;
 
 const BASE_URL = process.env.BASE_URL;
 const ZC_KEY = process.env.ZC_KEY;
+
+// חדשים (מ-Railway Variables)
 const ZC_TERMINAL = process.env.ZC_TERMINAL;
 const ZC_PASSWORD = process.env.ZC_PASSWORD;
 
@@ -52,7 +54,7 @@ body{
   box-shadow:0 15px 40px rgba(0,0,0,.12);
 }
 
-/* בר עליון */
+/* כפתור שפה אחד */
 .topbar{
   display:flex;
   justify-content:flex-end;
@@ -60,7 +62,6 @@ body{
   margin-bottom:10px;
 }
 
-/* כפתור שפה אחד - לא זז */
 .lang-btn{
   border:1px solid #ddd;
   background:#fff;
@@ -71,11 +72,12 @@ body{
   font-size:14px;
   color:#222;
   min-width:92px;
-  line-height:1;
   display:inline-flex;
   align-items:center;
   justify-content:center;
+  user-select:none;
 }
+.lang-btn:active{ transform:none; }  /* שלא "יקפוץ" בלחיצה */
 .lang-btn:hover{
   border-color:#c40000;
   box-shadow:0 0 0 2px rgba(196,0,0,0,0.10);
@@ -85,6 +87,7 @@ body{
   text-align:center;
   margin-bottom:18px;
 }
+
 .logo img{
   max-width:260px;
   height:auto;
@@ -133,8 +136,8 @@ button.pay{
   background:#c40000;
   color:#fff;
   transition:0.2s;
-  line-height:1;
 }
+
 button.pay:hover{
   background:#a00000;
 }
@@ -146,8 +149,14 @@ button.pay:hover{
   color:#777;
 }
 
-.ltr{ direction:ltr; text-align:left; }
-.rtl{ direction:rtl; text-align:right; }
+.ltr{
+  direction:ltr;
+  text-align:left;
+}
+.rtl{
+  direction:rtl;
+  text-align:right;
+}
 </style>
 </head>
 
@@ -238,7 +247,6 @@ function applyLang(code){
   document.getElementById("footer").textContent = t.footer;
   document.getElementById("pageTitle").textContent = t.pageTitle(orderId);
 
-  // הכפתור תמיד מציג את השפה השניה
   document.getElementById("btnLang").textContent = t.toggleBtn;
 
   localStorage.setItem("lang", code);
@@ -266,13 +274,12 @@ applyLang(saved);
 // ====== CREATE SESSION ======
 app.post("/create-session", async (req, res) => {
   try {
-    if (!BASE_URL || !ZC_KEY || !ZC_TERMINAL || !ZC_PASSWORD) {
-      return res
-        .status(500)
-        .send("Missing env vars: BASE_URL / ZC_KEY / ZC_TERMINAL / ZC_PASSWORD");
-    }
-
     const { orderId, amount, name, phone, email } = req.body;
+
+    if (!BASE_URL) return res.status(500).send("Missing BASE_URL env var");
+    if (!ZC_KEY) return res.status(500).send("Missing ZC_KEY env var");
+    if (!ZC_TERMINAL) return res.status(500).send("Missing ZC_TERMINAL env var");
+    if (!ZC_PASSWORD) return res.status(500).send("Missing ZC_PASSWORD env var");
 
     const cleanOrderId = String(orderId || "").replace(/\D/g, "");
     const total = Number(amount);
@@ -283,10 +290,10 @@ app.post("/create-session", async (req, res) => {
 
     const uniqueId = "order-" + cleanOrderId + "-" + Date.now();
 
-    // שים לב: אם Z-Credit דורשים שדות בשם אחר (TerminalNumber/Password וכו׳),
-    // נעדכן בהתאם לדוקומנטציה שלהם. כרגע שמתי TerminalNumber + Password בצורה נפוצה.
     const payload = {
       Key: ZC_KEY,
+
+      // חשוב: מסוף + סיסמה (כדי שלא יחזיר “WebCheckout not allowed” אם החשבון דורש זאת)
       TerminalNumber: String(ZC_TERMINAL),
       Password: String(ZC_PASSWORD),
 
@@ -294,19 +301,16 @@ app.post("/create-session", async (req, res) => {
       CallBackUrl: BASE_URL + "/zc-callback",
       SuccessUrl: BASE_URL + "/payment-success?orderId=" + cleanOrderId,
       CancelUrl: BASE_URL + "/payment-cancel?orderId=" + cleanOrderId,
-
       Currency: "ILS",
       Total: total,
       AdjustAmount: true,
       ShowCart: false,
       AdditionalText: cleanOrderId,
-
       Customer: {
-        Email: email,
-        Name: name,
-        PhoneNumber: phone,
+        Email: String(email || ""),
+        Name: String(name || ""),
+        PhoneNumber: String(phone || ""),
       },
-
       CartItems: [
         {
           Description: "Payment for order " + cleanOrderId,
@@ -333,7 +337,7 @@ app.post("/create-session", async (req, res) => {
       return res.redirect(data.Data.SessionUrl);
     }
 
-    // אם יש שגיאה מה-API – נחזיר כדי שתראה מה בדיוק חסר
+    // מחזיר את התשובה של Z-Credit כדי שתראה בדיוק מה לא תקין
     return res.status(400).json(data);
   } catch (err) {
     console.error("create-session error:", err);
