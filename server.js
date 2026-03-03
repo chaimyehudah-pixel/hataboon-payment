@@ -141,8 +141,7 @@ app.get("/pay/:orderId/:amount", (req, res) => {
       <input name="phone" required />
 
       <label>אימייל (לצורך חשבונית בלבד)</label>
-      <input type="email" name="email" required />
-
+ 
       <button class="pay" type="submit">המשך לתשלום</button>
     </form>
 
