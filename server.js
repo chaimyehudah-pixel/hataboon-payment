@@ -140,6 +140,9 @@ app.get("/pay/:orderId/:amount", (req, res) => {
       <label>טלפון</label>
       <input name="phone" required />
 
+      <label>אימייל (לצורך חשבונית בלבד)</label>
+      <input type="email" name="email" placeholder="לא חובה" />
+
       <button class="pay" type="submit">המשך לתשלום</button>
     </form>
 
@@ -158,7 +161,7 @@ app.get("/pay/:orderId/:amount", (req, res) => {
 // ====== CREATE SESSION ======
 app.post("/create-session", async (req, res) => {
   try {
-    const { orderId, amount, name, phone } = req.body;
+    const { orderId, amount, name, phone, email } = req.body;
 
     if (!BASE_URL || !ZC_KEY) {
       return res.status(500).send("Missing BASE_URL or ZC_KEY in Railway.");
@@ -172,6 +175,15 @@ app.post("/create-session", async (req, res) => {
     }
 
     const uniqueId = "order-" + cleanOrderId + "-" + Date.now();
+
+    // אימייל אופציונלי: אם ריק/לא קיים -> לא שולחים ל-ZCredit בכלל
+    const cleanEmail = String(email || "").trim();
+
+    const customer = {
+      Name: String(name || ""),
+      PhoneNumber: String(phone || ""),
+      ...(cleanEmail ? { Email: cleanEmail } : {}),
+    };
 
     const payload = {
       Key: String(ZC_KEY),
@@ -190,10 +202,7 @@ app.post("/create-session", async (req, res) => {
       ShowCart: false,
       AdditionalText: cleanOrderId,
 
-      Customer: {
-        Name: String(name || ""),
-        PhoneNumber: String(phone || ""),
-      },
+      Customer: customer,
 
       CartItems: [
         {
