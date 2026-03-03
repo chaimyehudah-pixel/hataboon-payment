@@ -4,6 +4,8 @@ const app = express();
 
 app.use(express.urlencoded({ extended: true }));
 app.use(express.json());
+
+// סטטיים מהתיקייה public (שם יהיה logo.jpeg)
 app.use(express.static("public"));
 
 const PORT = process.env.PORT || 3000;
@@ -18,7 +20,7 @@ app.get("/", (req, res) => {
   res.send("Hataboon Payment Server Running 🍕");
 });
 
-// ====== PAYMENT PAGE ======
+// ====== PAYMENT PAGE (עברית בלבד) ======
 app.get("/pay/:orderId/:amount", (req, res) => {
   const orderId = String(req.params.orderId || "").replace(/\D/g, "");
   const amount = Number(req.params.amount);
@@ -33,7 +35,7 @@ app.get("/pay/:orderId/:amount", (req, res) => {
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1" />
-<title id="pageTitle">תשלום להזמנה ${orderId}</title>
+<title>תשלום להזמנה ${orderId}</title>
 
 <style>
   body{
@@ -50,32 +52,6 @@ app.get("/pay/:orderId/:amount", (req, res) => {
     border-radius:20px;
     padding:28px;
     box-shadow:0 15px 40px rgba(0,0,0,.12);
-    position:relative;
-  }
-
-  /* כפתור שפה אחד בלבד (לא "בורח") */
-  .topbar{
-    display:flex;
-    justify-content:flex-end;
-    margin-bottom:10px;
-  }
-  .lang-btn{
-    border:1px solid #ddd;
-    background:#fff;
-    border-radius:12px;
-    padding:10px 14px;
-    cursor:pointer;
-    font-weight:800;
-    font-size:14px;
-    color:#222;
-    width:100px;
-    height:40px;
-    line-height:20px;
-    box-sizing:border-box;
-  }
-  .lang-btn:hover{
-    border-color:#c40000;
-    box-shadow:0 0 0 2px rgba(196,0,0,0,0.10);
   }
 
   .logo{
@@ -107,8 +83,8 @@ app.get("/pay/:orderId/:amount", (req, res) => {
     border:1px solid #ddd;
     border-radius:12px;
     font-size:16px;
-    direction:inherit;
-    text-align:inherit;
+    direction:rtl;
+    text-align:right;
     box-sizing:border-box;
   }
 
@@ -146,105 +122,37 @@ app.get("/pay/:orderId/:amount", (req, res) => {
 
 <body>
   <div class="card">
-    <div class="topbar">
-      <button type="button" class="lang-btn" id="btnLang">English</button>
-    </div>
-
     <div class="logo">
-      <img src="/logo.jpeg" alt="Hataboon Logo">
+      <img src="/logo.jpeg" alt="הטאבון">
     </div>
 
-    <h1 id="title"></h1>
+    <h1>תשלום להזמנה #${orderId}</h1>
 
     <form method="POST" action="/create-session">
       <input type="hidden" name="orderId" value="${orderId}" />
 
-      <label id="lblAmount"></label>
+      <label>סכום לתשלום (₪)</label>
       <input name="amount" value="${amount}" required />
 
-      <label id="lblName"></label>
+      <label>שם מלא</label>
       <input name="name" required />
 
-      <label id="lblPhone"></label>
+      <label>טלפון</label>
       <input name="phone" required />
 
-      <label id="lblEmail"></label>
+      <label>אימייל</label>
       <input type="email" name="email" required />
 
-      <button class="pay" type="submit" id="btnPay"></button>
+      <button class="pay" type="submit">המשך לתשלום</button>
     </form>
 
-    <div class="footer-note" id="footer"></div>
+    <div class="footer-note">התשלום מתבצע באמצעות מערכת מאובטחת של Z-Credit</div>
   </div>
-
-<script>
-  const orderId = "${orderId}";
-
-  const dict = {
-    he: {
-      lang: "he",
-      dir: "rtl",
-      title: (id) => "תשלום להזמנה #" + id,
-      amount: "סכום לתשלום (₪)",
-      name: "שם מלא",
-      phone: "טלפון",
-      email: "אימייל",
-      pay: "Continue to payment",   // כשהדף בעברית -> הכפתור באנגלית
-      footer: "התשלום מתבצע באמצעות מערכת מאובטחת של Z-Credit",
-      pageTitle: (id) => "תשלום להזמנה " + id,
-      toggleBtn: "English"
-    },
-    en: {
-      lang: "en",
-      dir: "ltr",
-      title: (id) => "Payment for Order #" + id,
-      amount: "Amount (₪)",
-      name: "Full name",
-      phone: "Phone",
-      email: "Email",
-      pay: "המשך לתשלום",          // כשהדף באנגלית -> הכפתור בעברית
-      footer: "Payment is processed via Z-Credit secure system",
-      pageTitle: (id) => "Payment for Order " + id,
-      toggleBtn: "עברית"
-    }
-  };
-
-  function applyLang(code){
-    const t = dict[code] || dict.he;
-
-    document.documentElement.lang = t.lang;
-    document.documentElement.dir = t.dir;
-
-    document.getElementById("title").textContent = t.title(orderId);
-    document.getElementById("lblAmount").textContent = t.amount;
-    document.getElementById("lblName").textContent = t.name;
-    document.getElementById("lblPhone").textContent = t.phone;
-    document.getElementById("lblEmail").textContent = t.email;
-    document.getElementById("btnPay").textContent = t.pay;
-    document.getElementById("footer").textContent = t.footer;
-    document.getElementById("pageTitle").textContent = t.pageTitle(orderId);
-    document.getElementById("btnLang").textContent = t.toggleBtn;
-
-    localStorage.setItem("lang", code);
-  }
-
-  function toggleLang(){
-    const current = localStorage.getItem("lang") || "he";
-    const next = current === "he" ? "en" : "he";
-    applyLang(next);
-  }
-
-  document.getElementById("btnLang").addEventListener("click", toggleLang);
-
-  const saved = localStorage.getItem("lang") || "he";
-  applyLang(saved);
-</script>
-
 </body>
 </html>
 `;
 
-  res.send(html);
+  res.type("html").send(html);
 });
 
 // ====== CREATE SESSION ======
@@ -252,10 +160,10 @@ app.post("/create-session", async (req, res) => {
   try {
     const { orderId, amount, name, phone, email } = req.body;
 
-    if (!BASE_URL || !ZC_KEY || !ZC_TERMINAL || !ZC_PASSWORD) {
-      return res.status(500).send(
-        "Missing env vars. Please set BASE_URL, ZC_KEY, ZC_TERMINAL, ZC_PASSWORD in Railway Variables."
-      );
+    if (!BASE_URL || !ZC_KEY) {
+      return res
+        .status(500)
+        .send("Missing env vars. Please set BASE_URL and ZC_KEY in Railway Variables.");
     }
 
     const cleanOrderId = String(orderId || "").replace(/\D/g, "");
@@ -265,14 +173,16 @@ app.post("/create-session", async (req, res) => {
       return res.status(400).send("Invalid form data");
     }
 
+    // כדי לאפשר כמה תשלומים על אותו קישור – UniqueID חייב להיות תמיד חדש
     const uniqueId = "order-" + cleanOrderId + "-" + Date.now();
 
-    // הערה: חלק מהחשבונות דורשים גם TerminalNumber+Password.
-    // אם ה-API אצלך לא צריך את זה - הוא יתעלם. אם כן צריך - עכשיו זה קיים.
+    // בחלק מהחשבונות צריך גם TerminalNumber + Password (אצלך זה כבר מוגדר ב-Variables)
     const payload = {
-      Key: ZC_KEY,
-      TerminalNumber: String(ZC_TERMINAL),
-      Password: String(ZC_PASSWORD),
+      Key: String(ZC_KEY),
+
+      // אם אין אצלך Terminal/Password ב-Variables – זה פשוט לא יישלח
+      ...(ZC_TERMINAL ? { TerminalNumber: String(ZC_TERMINAL) } : {}),
+      ...(ZC_PASSWORD ? { Password: String(ZC_PASSWORD) } : {}),
 
       UniqueID: uniqueId,
       CallBackUrl: BASE_URL + "/zc-callback",
@@ -283,17 +193,19 @@ app.post("/create-session", async (req, res) => {
       Total: total,
       AdjustAmount: true,
       ShowCart: false,
+
+      // "מידע נוסף" – מספר הזמנה בלבד
       AdditionalText: cleanOrderId,
 
       Customer: {
-        Email: email,
-        Name: name,
-        PhoneNumber: phone,
+        Email: String(email || ""),
+        Name: String(name || ""),
+        PhoneNumber: String(phone || ""),
       },
 
       CartItems: [
         {
-          Description: "Payment for order " + cleanOrderId,
+          Description: "תשלום להזמנה " + cleanOrderId,
           Quantity: 1,
           UnitPrice: total,
           Amount: total,
@@ -317,7 +229,7 @@ app.post("/create-session", async (req, res) => {
       return res.redirect(data.Data.SessionUrl);
     }
 
-    // מחזירים תשובה מפורטת כדי שתראה בדיוק מה הבעיה
+    // מחזיר שגיאה מפורטת כדי לראות למה לא נתן SessionUrl
     return res.status(400).json(data);
   } catch (err) {
     console.error("create-session error:", err);
@@ -327,8 +239,13 @@ app.post("/create-session", async (req, res) => {
 
 // ====== CALLBACK ======
 app.all("/zc-callback", (req, res) => {
-  console.log("ZC CALLBACK:", req.body);
-  res.send("OK");
+  console.log("========== ZC CALLBACK ==========");
+  console.log("Time:", new Date().toISOString());
+  console.log("Method:", req.method);
+  console.log("Query:", req.query);
+  console.log("Body:", req.body);
+  console.log("================================");
+  res.type("text").status(200).send("OK");
 });
 
 // ====== SUCCESS ======
