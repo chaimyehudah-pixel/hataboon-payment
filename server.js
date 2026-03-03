@@ -4,8 +4,6 @@ const app = express();
 
 app.use(express.urlencoded({ extended: true }));
 app.use(express.json());
-
-// סטטיים מהתיקייה public (שם יהיה logo.jpeg)
 app.use(express.static("public"));
 
 const PORT = process.env.PORT || 3000;
@@ -20,7 +18,7 @@ app.get("/", (req, res) => {
   res.send("Hataboon Payment Server Running 🍕");
 });
 
-// ====== PAYMENT PAGE (עברית בלבד) ======
+// ====== PAYMENT PAGE ======
 app.get("/pay/:orderId/:amount", (req, res) => {
   const orderId = String(req.params.orderId || "").replace(/\D/g, "");
   const amount = Number(req.params.amount);
@@ -107,6 +105,7 @@ app.get("/pay/:orderId/:amount", (req, res) => {
     color:#fff;
     transition:0.2s;
   }
+
   button.pay:hover{
     background:#a00000;
   }
@@ -122,6 +121,7 @@ app.get("/pay/:orderId/:amount", (req, res) => {
 
 <body>
   <div class="card">
+
     <div class="logo">
       <img src="/logo.jpeg" alt="הטאבון">
     </div>
@@ -140,12 +140,13 @@ app.get("/pay/:orderId/:amount", (req, res) => {
       <label>טלפון</label>
       <input name="phone" required />
 
-      <label>אימייל (לצורך חשבונית בלבד)</label>
- 
       <button class="pay" type="submit">המשך לתשלום</button>
     </form>
 
-    <div class="footer-note">התשלום מתבצע באמצעות מערכת מאובטחת של Z-Credit</div>
+    <div class="footer-note">
+      התשלום מתבצע באמצעות מערכת מאובטחת של Z-Credit
+    </div>
+
   </div>
 </body>
 </html>
@@ -157,12 +158,10 @@ app.get("/pay/:orderId/:amount", (req, res) => {
 // ====== CREATE SESSION ======
 app.post("/create-session", async (req, res) => {
   try {
-    const { orderId, amount, name, phone, email } = req.body;
+    const { orderId, amount, name, phone } = req.body;
 
     if (!BASE_URL || !ZC_KEY) {
-      return res
-        .status(500)
-        .send("Missing env vars. Please set BASE_URL and ZC_KEY in Railway Variables.");
+      return res.status(500).send("Missing BASE_URL or ZC_KEY in Railway.");
     }
 
     const cleanOrderId = String(orderId || "").replace(/\D/g, "");
@@ -172,14 +171,11 @@ app.post("/create-session", async (req, res) => {
       return res.status(400).send("Invalid form data");
     }
 
-    // כדי לאפשר כמה תשלומים על אותו קישור – UniqueID חייב להיות תמיד חדש
     const uniqueId = "order-" + cleanOrderId + "-" + Date.now();
 
-    // בחלק מהחשבונות צריך גם TerminalNumber + Password (אצלך זה כבר מוגדר ב-Variables)
     const payload = {
       Key: String(ZC_KEY),
 
-      // אם אין אצלך Terminal/Password ב-Variables – זה פשוט לא יישלח
       ...(ZC_TERMINAL ? { TerminalNumber: String(ZC_TERMINAL) } : {}),
       ...(ZC_PASSWORD ? { Password: String(ZC_PASSWORD) } : {}),
 
@@ -192,12 +188,9 @@ app.post("/create-session", async (req, res) => {
       Total: total,
       AdjustAmount: true,
       ShowCart: false,
-
-      // "מידע נוסף" – מספר הזמנה בלבד
       AdditionalText: cleanOrderId,
 
       Customer: {
-        Email: String(email || ""),
         Name: String(name || ""),
         PhoneNumber: String(phone || ""),
       },
@@ -228,7 +221,6 @@ app.post("/create-session", async (req, res) => {
       return res.redirect(data.Data.SessionUrl);
     }
 
-    // מחזיר שגיאה מפורטת כדי לראות למה לא נתן SessionUrl
     return res.status(400).json(data);
   } catch (err) {
     console.error("create-session error:", err);
@@ -240,21 +232,19 @@ app.post("/create-session", async (req, res) => {
 app.all("/zc-callback", (req, res) => {
   console.log("========== ZC CALLBACK ==========");
   console.log("Time:", new Date().toISOString());
-  console.log("Method:", req.method);
-  console.log("Query:", req.query);
   console.log("Body:", req.body);
   console.log("================================");
-  res.type("text").status(200).send("OK");
+  res.status(200).send("OK");
 });
 
 // ====== SUCCESS ======
 app.get("/payment-success", (req, res) => {
-  res.send("Payment Success ✅ Order: " + (req.query.orderId || ""));
+  res.send("התשלום בוצע בהצלחה ✅ הזמנה: " + (req.query.orderId || ""));
 });
 
 // ====== CANCEL ======
 app.get("/payment-cancel", (req, res) => {
-  res.send("Payment Cancel ❌");
+  res.send("התשלום בוטל ❌");
 });
 
 app.listen(PORT, () => {
