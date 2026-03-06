@@ -14,11 +14,10 @@ const ZC_KEY = process.env.ZC_KEY;
 const ZC_TERMINAL = process.env.ZC_TERMINAL;
 const ZC_PASSWORD = process.env.ZC_PASSWORD;
 
-// ✅ כתובת שרת ה-OTP (מה-cloudflared שלך), לדוגמה:
-// https://untitled-him-quality-charm.trycloudflare.com
+// כתובת שרת ה-OTP (ה-trycloudflare הפעיל שלך)
 const OTP_SERVER_URL = (process.env.OTP_SERVER_URL || "").trim();
 
-// ✅ סוד חתימה פנימי (תגדיר ב-Railway), כדי שלא יוכלו לזייף "טלפון מאומת"
+// סוד חתימה פנימי
 const OTP_SIGNING_SECRET = process.env.OTP_SIGNING_SECRET || "";
 
 // ===== Helpers =====
@@ -29,11 +28,6 @@ function cleanOrderId(v) {
 function toAmountNumber(v) {
   const n = Number(v);
   return Number.isFinite(n) ? n : NaN;
-}
-
-function normalizePhoneForDisplay(v) {
-  // לא חייב מושלם, רק להצגה; ה-OTP server שלך כבר מנרמל אמיתי
-  return String(v || "").trim();
 }
 
 function hmacSign(payloadObj) {
@@ -57,7 +51,6 @@ function hmacVerify(token) {
     .update(payloadB64)
     .digest("base64url");
 
-  // השוואה בטוחה
   const a = Buffer.from(sig);
   const b = Buffer.from(expected);
   if (a.length !== b.length) return null;
@@ -70,7 +63,6 @@ function hmacVerify(token) {
     return null;
   }
 
-  // בדיקת תוקף
   if (!obj || !obj.exp || Date.now() > obj.exp) return null;
   return obj;
 }
@@ -79,9 +71,54 @@ function otpConfigOk() {
   return Boolean(OTP_SERVER_URL) && Boolean(OTP_SIGNING_SECRET);
 }
 
+function otpBaseUrl() {
+  return OTP_SERVER_URL.replace(/\/+$/g, "");
+}
+
 // ====== HOME ======
 app.get("/", (req, res) => {
   res.send("Hataboon Payment Server Running 🍕");
+});
+
+// ====== OTP PROXY דרך Railway ======
+app.post("/otp/request", async (req, res) => {
+  try {
+    if (!OTP_SERVER_URL) {
+      return res.status(500).json({ ok: false, error: "OTP_SERVER_URL missing" });
+    }
+
+    const response = await fetch(otpBaseUrl() + "/otp/request", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(req.body || {}),
+    });
+
+    const text = await response.text();
+    return res.status(response.status).type("application/json").send(text);
+  } catch (err) {
+    console.error("otp/request proxy error:", err);
+    return res.status(500).json({ ok: false, error: "שגיאה בשליחת קוד" });
+  }
+});
+
+app.post("/otp/verify", async (req, res) => {
+  try {
+    if (!OTP_SERVER_URL) {
+      return res.status(500).json({ ok: false, error: "OTP_SERVER_URL missing" });
+    }
+
+    const response = await fetch(otpBaseUrl() + "/otp/verify", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(req.body || {}),
+    });
+
+    const text = await response.text();
+    return res.status(response.status).type("application/json").send(text);
+  } catch (err) {
+    console.error("otp/verify proxy error:", err);
+    return res.status(500).json({ ok: false, error: "שגיאה באימות" });
+  }
 });
 
 // ====== PAYMENT PAGE (כולל OTP) ======
@@ -93,7 +130,6 @@ app.get("/pay/:orderId/:amount", (req, res) => {
     return res.status(400).send("Invalid parameters");
   }
 
-  // אם לא הוגדר OTP_SERVER_URL/OTP_SIGNING_SECRET -> נציג הודעה (כמו אצלך)
   const otpMissing = !otpConfigOk();
 
   const html = `
@@ -228,7 +264,6 @@ app.get("/pay/:orderId/:amount", (req, res) => {
 
     ${otpMissing ? `<div class="warn">⚠️ חסר OTP_SERVER_URL או OTP_SIGNING_SECRET ב-Railway (לא ניתן לשלוח קוד אימות)</div>` : ``}
 
-    <!-- שלב 1: פרטים -->
     <form id="detailsForm" ${otpMissing ? `class="hidden"` : ``}>
       <input type="hidden" id="orderId" value="${orderId}" />
       <label>סכום לתשלום (₪)</label>
@@ -271,7 +306,6 @@ app.get("/pay/:orderId/:amount", (req, res) => {
       </div>
     </form>
 
-    <!-- שלב 2: יצירת תשלום (רק אחרי אימות) -->
     <form id="payForm" method="POST" action="/create-session" class="hidden">
       <input type="hidden" name="orderId" id="pay_orderId" />
       <input type="hidden" name="amount" id="pay_amount" />
@@ -289,7 +323,7 @@ app.get("/pay/:orderId/:amount", (req, res) => {
 
 <script>
 (function(){
-  const OTP_URL = ${JSON.stringify(OTP_SERVER_URL)};
+  const OTP_URL = "";
   const orderIdEl = document.getElementById('orderId');
   const amountEl = document.getElementById('amount');
   const nameEl = document.getElementById('name');
@@ -392,7 +426,6 @@ app.get("/pay/:orderId/:amount", (req, res) => {
     };
   }
 
-  // שחזור מצב אחרי רענון (כדי שלא ייצור עוד ועוד קודים)
   (function restore(){
     const orderId = String(orderIdEl.value||'').trim();
     const st = loadState(orderId);
@@ -414,7 +447,6 @@ app.get("/pay/:orderId/:amount", (req, res) => {
     if(!f.name){ show(msg1,'חסר שם'); return; }
     if(!f.phone){ show(msg1,'חסר טלפון'); return; }
 
-    // אם כבר יש מצב "otp_sent" בתוקף — לא מייצרים חדש
     const st = loadState(f.orderId);
     if(st && st.step === 'otp_sent' && st.expAt && Date.now() < st.expAt){
       otpSection.classList.remove('hidden');
@@ -426,14 +458,13 @@ app.get("/pay/:orderId/:amount", (req, res) => {
     try{
       setButtonsLocked(true);
 
-      const resp = await postJson(OTP_URL + "/otp/request", { phone: f.phone, orderId: f.orderId });
+      const resp = await postJson("/otp/request", { phone: f.phone, orderId: f.orderId });
 
       if(!resp || resp.ok !== true){
         show(msg1, (resp && resp.error) ? resp.error : 'שגיאה בשליחת קוד');
         return;
       }
 
-      // אם ה-OTP server מחזיר expSeconds נשתמש, אחרת 5 דקות
       const expAt = Date.now() + ((resp.expSeconds ? Number(resp.expSeconds) : 300) * 1000);
 
       saveState(f.orderId, { step:'otp_sent', expAt });
@@ -459,7 +490,7 @@ app.get("/pay/:orderId/:amount", (req, res) => {
     try{
       setButtonsLocked(true);
 
-      const resp = await postJson(OTP_URL + "/otp/request", { phone: f.phone, orderId: f.orderId });
+      const resp = await postJson("/otp/request", { phone: f.phone, orderId: f.orderId });
 
       if(!resp || resp.ok !== true){
         show(msg2, (resp && resp.error) ? resp.error : 'שגיאה בשליחת קוד');
@@ -493,23 +524,19 @@ app.get("/pay/:orderId/:amount", (req, res) => {
     try{
       setButtonsLocked(true);
 
-      const resp = await postJson(OTP_URL + "/otp/verify", { phone: f.phone, orderId: f.orderId, code: otp });
+      const resp = await postJson("/otp/verify", { phone: f.phone, orderId: f.orderId, code: otp });
 
       if(!resp || resp.ok !== true){
-        // למשל: "invalid code", "locked", "tries left"
         show(msg2, (resp && resp.error) ? resp.error : 'קוד לא תקין');
         return;
       }
 
-      // קיבלנו טלפון מאומת מהשרת (972...)
       const phone972 = resp.phone972 || '';
       if(!phone972){
         show(msg2, 'שגיאה באימות');
         return;
       }
 
-      // בונים טוקן חתום שמכיל את הטלפון המאומת + תוקף קצר (10 דקות)
-      // הטוקן הזה נשלח לשרת שלנו ב-/create-session, ורק ממנו ניקח טלפון ל-ZCredit.
       const tokenResp = await postJson("/otp/issue-token", {
         orderId: f.orderId,
         phone972: phone972
@@ -520,14 +547,12 @@ app.get("/pay/:orderId/:amount", (req, res) => {
         return;
       }
 
-      // מעבירים נתונים ל-payForm (ומסתירים את שלב הפרטים)
       pay_orderId.value = f.orderId;
       pay_amount.value = f.amount;
       pay_name.value = f.name;
       pay_email.value = f.email;
       pay_otp_token.value = tokenResp.token;
 
-      // מנקים מצב כדי שלא יצטבר
       clearState(f.orderId);
 
       detailsForm.classList.add('hidden');
@@ -552,7 +577,7 @@ app.get("/pay/:orderId/:amount", (req, res) => {
   res.type("html").send(html);
 });
 
-// ====== Issue signed token after OTP verified (called from the page) ======
+// ====== Issue signed token after OTP verified ======
 app.post("/otp/issue-token", (req, res) => {
   try {
     if (!otpConfigOk()) {
@@ -567,7 +592,6 @@ app.post("/otp/issue-token", (req, res) => {
       return res.status(400).json({ ok: false, error: "phone972 invalid" });
     }
 
-    // תוקף טוקן: 10 דקות
     const token = hmacSign({
       orderId,
       phone972,
@@ -603,8 +627,6 @@ app.post("/create-session", async (req, res) => {
     const customerName = String(name || "").trim();
     if (!customerName) return res.status(400).send("Missing name");
 
-    // ✅ כאן אנחנו לא משתמשים בכלל ב-phone מהלקוח!
-    // ✅ אנחנו לוקחים טלפון רק מהטוקן החתום אחרי OTP
     const verified = hmacVerify(String(otp_token || ""));
     if (!verified) {
       return res.status(400).send("OTP token invalid/expired");
@@ -624,7 +646,6 @@ app.post("/create-session", async (req, res) => {
 
     const customer = {
       Name: customerName,
-      // ZCredit לרוב מקבל 0XXXXXXXXX או 972XXXXXXXXX - נשאיר 972 כדי להיות עקבי
       PhoneNumber: phone972,
       ...(cleanEmail ? { Email: cleanEmail } : {}),
     };
