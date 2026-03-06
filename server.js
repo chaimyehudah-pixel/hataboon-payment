@@ -14,11 +14,17 @@ const ZC_KEY = process.env.ZC_KEY;
 const ZC_TERMINAL = process.env.ZC_TERMINAL;
 const ZC_PASSWORD = process.env.ZC_PASSWORD;
 
-// כתובת שרת ה-OTP (ה-trycloudflare הפעיל שלך)
 const OTP_SERVER_URL = (process.env.OTP_SERVER_URL || "").trim();
-
-// סוד חתימה פנימי
 const OTP_SIGNING_SECRET = process.env.OTP_SIGNING_SECRET || "";
+
+// =========================
+// זמני נעילה לשליחה מחדש
+// =========================
+const RESEND_LOCKS_MINUTES = [5, 10, 15]; // ראשונה 5, שנייה 10, שלישית+ 15
+const FLOW_TTL_MINUTES = 60; // נשמור flow עד שעה בזיכרון
+
+// flow store בזיכרון השרת
+const otpFlows = new Map();
 
 // ===== Helpers =====
 function cleanOrderId(v) {
@@ -28,6 +34,22 @@ function cleanOrderId(v) {
 function toAmountNumber(v) {
   const n = Number(v);
   return Number.isFinite(n) ? n : NaN;
+}
+
+function otpConfigOk() {
+  return Boolean(OTP_SERVER_URL) && Boolean(OTP_SIGNING_SECRET);
+}
+
+function otpBaseUrl() {
+  return OTP_SERVER_URL.replace(/\/+$/g, "");
+}
+
+function htmlEscape(str) {
+  return String(str || "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
 }
 
 function hmacSign(payloadObj) {
@@ -44,6 +66,7 @@ function hmacVerify(token) {
   if (!token || typeof token !== "string") return null;
   const parts = token.split(".");
   if (parts.length !== 2) return null;
+
   const [payloadB64, sig] = parts;
 
   const expected = crypto
@@ -67,78 +90,164 @@ function hmacVerify(token) {
   return obj;
 }
 
-function otpConfigOk() {
-  return Boolean(OTP_SERVER_URL) && Boolean(OTP_SIGNING_SECRET);
+function randomId() {
+  return crypto.randomBytes(24).toString("hex");
 }
 
-function otpBaseUrl() {
-  return OTP_SERVER_URL.replace(/\/+$/g, "");
+function cleanupOldFlows() {
+  const now = Date.now();
+  for (const [flowId, flow] of otpFlows.entries()) {
+    if (!flow || !flow.createdAt || now - flow.createdAt > FLOW_TTL_MINUTES * 60 * 1000) {
+      otpFlows.delete(flowId);
+    }
+  }
 }
 
-// ====== HOME ======
-app.get("/", (req, res) => {
-  res.send("Hataboon Payment Server Running 🍕");
-});
+function getFlow(flowId) {
+  cleanupOldFlows();
+  return otpFlows.get(flowId) || null;
+}
 
-// ====== OTP PROXY דרך Railway ======
-app.post("/otp/request", async (req, res) => {
+function setFlow(flowId, flow) {
+  otpFlows.set(flowId, flow);
+}
+
+function resendWaitMinutesByCount(resendCount) {
+  if (resendCount <= 0) return RESEND_LOCKS_MINUTES[0];
+  if (resendCount === 1) return RESEND_LOCKS_MINUTES[1];
+  return RESEND_LOCKS_MINUTES[2];
+}
+
+function formatRemainingMs(ms) {
+  const left = Math.max(0, ms);
+  const totalSec = Math.ceil(left / 1000);
+  const mm = String(Math.floor(totalSec / 60)).padStart(2, "0");
+  const ss = String(totalSec % 60).padStart(2, "0");
+  return `${mm}:${ss}`;
+}
+
+async function requestOtp(phone, orderId) {
+  const response = await fetch(otpBaseUrl() + "/otp/request", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ phone, orderId }),
+  });
+
+  const text = await response.text();
+
+  let data;
   try {
-    if (!OTP_SERVER_URL) {
-      return res.status(500).json({ ok: false, error: "OTP_SERVER_URL missing" });
-    }
+    data = JSON.parse(text);
+  } catch {
+    data = { ok: false, error: text || "otp request failed" };
+  }
 
-    const response = await fetch(otpBaseUrl() + "/otp/request", {
+  return { status: response.status, data };
+}
+
+async function verifyOtp(phone, orderId, code) {
+  const response = await fetch(otpBaseUrl() + "/otp/verify", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ phone, orderId, code }),
+  });
+
+  const text = await response.text();
+
+  let data;
+  try {
+    data = JSON.parse(text);
+  } catch {
+    data = { ok: false, error: text || "otp verify failed" };
+  }
+
+  return { status: response.status, data };
+}
+
+async function createZCreditSession({ orderId, amount, name, email, phone972 }) {
+  if (!BASE_URL || !ZC_KEY) {
+    throw new Error("Missing BASE_URL or ZC_KEY in Railway.");
+  }
+
+  const cleanId = cleanOrderId(orderId);
+  const total = toAmountNumber(amount);
+
+  if (!cleanId || !Number.isFinite(total) || total <= 0) {
+    throw new Error("Invalid form data");
+  }
+
+  const customerName = String(name || "").trim();
+  if (!customerName) throw new Error("Missing name");
+
+  if (!String(phone972 || "").startsWith("972")) {
+    throw new Error("OTP phone invalid");
+  }
+
+  const uniqueId = "order-" + cleanId + "-" + Date.now();
+  const cleanEmail = String(email || "").trim();
+
+  const customer = {
+    Name: customerName,
+    PhoneNumber: String(phone972),
+    ...(cleanEmail ? { Email: cleanEmail } : {}),
+  };
+
+  const payload = {
+    Key: String(ZC_KEY),
+
+    ...(ZC_TERMINAL ? { TerminalNumber: String(ZC_TERMINAL) } : {}),
+    ...(ZC_PASSWORD ? { Password: String(ZC_PASSWORD) } : {}),
+
+    UniqueID: uniqueId,
+    CallBackUrl: BASE_URL + "/zc-callback",
+    SuccessUrl: BASE_URL + "/payment-success?orderId=" + cleanId,
+    CancelUrl: BASE_URL + "/payment-cancel?orderId=" + cleanId,
+
+    Currency: "ILS",
+    Total: total,
+    AdjustAmount: true,
+    ShowCart: false,
+    AdditionalText: cleanId,
+
+    Customer: customer,
+
+    CartItems: [
+      {
+        Description: "תשלום להזמנה " + cleanId,
+        Quantity: 1,
+        UnitPrice: total,
+        Amount: total,
+        Currency: "ILS",
+      },
+    ],
+  };
+
+  const response = await fetch(
+    "https://pci.zcredit.co.il/webcheckout/api/WebCheckout/CreateSession",
+    {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(req.body || {}),
-    });
-
-    const text = await response.text();
-    return res.status(response.status).type("application/json").send(text);
-  } catch (err) {
-    console.error("otp/request proxy error:", err);
-    return res.status(500).json({ ok: false, error: "שגיאה בשליחת קוד" });
-  }
-});
-
-app.post("/otp/verify", async (req, res) => {
-  try {
-    if (!OTP_SERVER_URL) {
-      return res.status(500).json({ ok: false, error: "OTP_SERVER_URL missing" });
+      body: JSON.stringify(payload),
     }
+  );
 
-    const response = await fetch(otpBaseUrl() + "/otp/verify", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(req.body || {}),
-    });
+  const data = await response.json();
 
-    const text = await response.text();
-    return res.status(response.status).type("application/json").send(text);
-  } catch (err) {
-    console.error("otp/verify proxy error:", err);
-    return res.status(500).json({ ok: false, error: "שגיאה באימות" });
-  }
-});
-
-// ====== PAYMENT PAGE (כולל OTP) ======
-app.get("/pay/:orderId/:amount", (req, res) => {
-  const orderId = cleanOrderId(req.params.orderId);
-  const amount = toAmountNumber(req.params.amount);
-
-  if (!orderId || !Number.isFinite(amount) || amount <= 0) {
-    return res.status(400).send("Invalid parameters");
+  if (data?.Data?.SessionUrl) {
+    return data.Data.SessionUrl;
   }
 
-  const otpMissing = !otpConfigOk();
+  throw new Error(JSON.stringify(data));
+}
 
-  const html = `
+function renderPaymentPage({ orderId, amount, otpMissing = false }) {
+  return `
 <!doctype html>
 <html lang="he" dir="rtl">
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1" />
-<title>תשלום להזמנה ${orderId}</title>
+<title>תשלום להזמנה ${htmlEscape(orderId)}</title>
 
 <style>
   body{
@@ -157,7 +266,7 @@ app.get("/pay/:orderId/:amount", (req, res) => {
   }
   .logo{text-align:center;margin-bottom:18px;}
   .logo img{max-width:260px;height:auto;}
-  h1{text-align:center;margin:0 0 14px;font-size:22px;color:#222;}
+  h1{text-align:center;margin:0 0 20px;font-size:22px;color:#222;}
   label{display:block;margin:14px 0 6px;font-weight:700;color:#333;}
   input{
     width:100%;
@@ -176,7 +285,7 @@ app.get("/pay/:orderId/:amount", (req, res) => {
   }
   button{
     width:100%;
-    margin-top:16px;
+    margin-top:20px;
     padding:15px;
     border:0;
     border-radius:14px;
@@ -187,18 +296,15 @@ app.get("/pay/:orderId/:amount", (req, res) => {
     color:#fff;
     transition:0.2s;
   }
-  button:hover{ background:#a00000; }
-  button.secondary{
-    background:#444;
+  button:hover{
+    background:#a00000;
   }
-  button.secondary:hover{ background:#2d2d2d; }
-
-  .note{
+  .footer-note{
     text-align:center;
-    margin-top:10px;
+    margin-top:12px;
     font-size:13px;
     color:#777;
-    line-height:1.4;
+    line-height:1.45;
   }
   .warn{
     background:#fff3cd;
@@ -206,49 +312,8 @@ app.get("/pay/:orderId/:amount", (req, res) => {
     color:#664d03;
     padding:12px 14px;
     border-radius:12px;
-    margin:10px 0 12px;
+    margin:10px 0 16px;
     font-weight:700;
-  }
-  .small{
-    font-size:12px;
-    color:#666;
-    margin-top:6px;
-    line-height:1.35;
-  }
-  .error{
-    color:#b00020;
-    font-weight:700;
-    margin-top:10px;
-    text-align:center;
-    white-space:pre-line;
-  }
-  .success{
-    color:#0a7a2f;
-    font-weight:700;
-    margin-top:10px;
-    text-align:center;
-    white-space:pre-line;
-  }
-  .hidden{ display:none; }
-
-  .timer{
-    text-align:center;
-    font-weight:800;
-    margin-top:8px;
-  }
-
-  .otpBox{
-    margin-top:10px;
-    padding-top:10px;
-    border-top:1px solid #eee;
-  }
-
-  .otpInput{
-    letter-spacing:8px;
-    text-align:center;
-    direction:ltr;
-    font-size:22px;
-    font-weight:800;
   }
 </style>
 </head>
@@ -260,324 +325,391 @@ app.get("/pay/:orderId/:amount", (req, res) => {
       <img src="/logo.jpeg" alt="הטאבון">
     </div>
 
-    <h1>תשלום להזמנה #${orderId}</h1>
+    <h1>תשלום להזמנה #${htmlEscape(orderId)}</h1>
 
-    ${otpMissing ? `<div class="warn">⚠️ חסר OTP_SERVER_URL או OTP_SIGNING_SECRET ב-Railway (לא ניתן לשלוח קוד אימות)</div>` : ``}
+    ${otpMissing ? `<div class="warn">⚠️ חסר OTP_SERVER_URL או OTP_SIGNING_SECRET ב-Railway</div>` : ``}
 
-    <form id="detailsForm" ${otpMissing ? `class="hidden"` : ``}>
-      <input type="hidden" id="orderId" value="${orderId}" />
+    <form method="POST" action="/otp/start">
+      <input type="hidden" name="orderId" value="${htmlEscape(orderId)}" />
+
       <label>סכום לתשלום (₪)</label>
-      <input id="amount" value="${amount}" required />
+      <input name="amount" value="${htmlEscape(amount)}" required />
 
       <label>שם מלא</label>
-      <input id="name" required />
+      <input name="name" required />
 
       <label>טלפון</label>
-      <input id="phone" required />
+      <input name="phone" required />
 
       <label>אימייל (לצורך חשבונית בלבד)</label>
-      <input id="email" type="email" placeholder="לא חובה" />
+      <input type="email" name="email" placeholder="לא חובה" />
 
-      <button type="submit" id="sendOtpBtn">שלח קוד אימות לוואטסאפ</button>
-
-      <div class="note">
-        לפני התשלום יישלח קוד אימות לוואטסאפ כדי לוודא שהטלפון נכון ✅
-      </div>
-
-      <div id="msg1" class="error hidden"></div>
-      <div id="ok1" class="success hidden"></div>
-
-      <div id="otpSection" class="otpBox hidden">
-        <div class="small" style="text-align:center;">
-          שלחנו קוד אימות לוואטסאפ. הזינו כאן את הקוד (4 ספרות).<br/>
-          אם לא הגיע — בדקו שהמספר נכון ושיש לכם וואטסאפ על המספר הזה.
-        </div>
-
-        <div class="timer" id="timer"></div>
-
-        <label>קוד אימות (4 ספרות)</label>
-        <input id="otp" class="otpInput" inputmode="numeric" maxlength="4" placeholder="••••" />
-
-        <button type="button" id="verifyBtn" class="secondary">אמת קוד והמשך</button>
-        <button type="button" id="resendBtn" class="secondary">שלח שוב קוד</button>
-
-        <div id="msg2" class="error hidden"></div>
-        <div id="ok2" class="success hidden"></div>
-      </div>
+      <button type="submit">שלח קוד אימות לוואטסאפ</button>
     </form>
 
-    <form id="payForm" method="POST" action="/create-session" class="hidden">
-      <input type="hidden" name="orderId" id="pay_orderId" />
-      <input type="hidden" name="amount" id="pay_amount" />
-      <input type="hidden" name="name" id="pay_name" />
-      <input type="hidden" name="email" id="pay_email" />
-      <input type="hidden" name="otp_token" id="pay_otp_token" />
-      <button class="pay" type="submit">המשך לתשלום</button>
+    <div class="footer-note">
+      לפני התשלום יישלח קוד אימות לוואטסאפ כדי לוודא שהטלפון נכון ✅
+    </div>
 
-      <div class="note">
-        התשלום מתבצע באמצעות מערכת מאובטחת של Z-Credit
-      </div>
+  </div>
+</body>
+</html>
+`;
+}
+
+function renderOtpPage({ flow, flowId, error = "", success = "" }) {
+  const now = Date.now();
+  const waitMs = Math.max(0, (flow.nextResendAt || 0) - now);
+  const canResend = waitMs <= 0;
+  const resendCount = Number(flow.resendCount || 0);
+
+  const nextWaitMinutes = resendWaitMinutesByCount(resendCount);
+
+  return `
+<!doctype html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>אימות קוד</title>
+
+<style>
+  body{
+    font-family:Arial,Helvetica,sans-serif;
+    background:linear-gradient(180deg,#f5f5f5,#e9e9e9);
+    margin:0;
+    padding:20px;
+  }
+  .card{
+    max-width:420px;
+    margin:60px auto;
+    background:#ffffff;
+    border-radius:20px;
+    padding:28px;
+    box-shadow:0 15px 40px rgba(0,0,0,.12);
+  }
+  h1{
+    text-align:center;
+    margin:0 0 12px;
+    font-size:22px;
+    color:#222;
+  }
+  .sub{
+    text-align:center;
+    color:#666;
+    font-size:14px;
+    line-height:1.5;
+    margin-bottom:18px;
+  }
+  label{
+    display:block;
+    margin:14px 0 6px;
+    font-weight:700;
+    color:#333;
+  }
+  input{
+    width:100%;
+    padding:14px;
+    border:1px solid #ddd;
+    border-radius:12px;
+    font-size:22px;
+    font-weight:800;
+    direction:ltr;
+    text-align:center;
+    letter-spacing:8px;
+    box-sizing:border-box;
+  }
+  input:focus{
+    border-color:#c40000;
+    outline:none;
+    box-shadow:0 0 0 2px rgba(196,0,0,0,0.15);
+  }
+  button{
+    width:100%;
+    margin-top:16px;
+    padding:15px;
+    border:0;
+    border-radius:14px;
+    font-size:18px;
+    font-weight:800;
+    cursor:pointer;
+    background:#c40000;
+    color:#fff;
+  }
+  button:hover{
+    background:#a00000;
+  }
+  button.secondary{
+    background:#444;
+  }
+  button.secondary:hover{
+    background:#2d2d2d;
+  }
+  button[disabled]{
+    background:#aaa;
+    cursor:not-allowed;
+  }
+  .error{
+    color:#b00020;
+    font-weight:700;
+    margin-top:12px;
+    text-align:center;
+    white-space:pre-line;
+  }
+  .success{
+    color:#0a7a2f;
+    font-weight:700;
+    margin-top:12px;
+    text-align:center;
+    white-space:pre-line;
+  }
+  .timer{
+    text-align:center;
+    margin-top:14px;
+    font-size:15px;
+    font-weight:700;
+    color:#444;
+  }
+  .small{
+    margin-top:12px;
+    text-align:center;
+    font-size:13px;
+    color:#777;
+    line-height:1.45;
+  }
+</style>
+</head>
+
+<body>
+  <div class="card">
+    <h1>אימות קוד</h1>
+
+    <div class="sub">
+      שלחנו קוד אימות לוואטסאפ.<br/>
+      הזן כאן את הקוד כדי להמשיך לתשלום.
+    </div>
+
+    ${error ? `<div class="error">${htmlEscape(error)}</div>` : ``}
+    ${success ? `<div class="success">${htmlEscape(success)}</div>` : ``}
+
+    <form method="POST" action="/otp/${htmlEscape(flowId)}/verify">
+      <label>קוד אימות (4 ספרות)</label>
+      <input name="code" inputmode="numeric" maxlength="4" placeholder="••••" required />
+      <button type="submit">אישור</button>
     </form>
 
+    <div class="timer" id="timer"></div>
+
+    <form method="POST" action="/otp/${htmlEscape(flowId)}/resend">
+      <button type="submit" id="resendBtn" class="secondary" ${canResend ? "" : "disabled"}>
+        שלח קוד חדש
+      </button>
+    </form>
+
+    <div class="small">
+      שליחה מחדש אפשרית רק לאחר ההמתנה.<br/>
+      ההמתנה הבאה אחרי שליחה תהיה ${nextWaitMinutes} דקות.
+    </div>
   </div>
 
 <script>
 (function(){
-  const OTP_URL = "";
-  const orderIdEl = document.getElementById('orderId');
-  const amountEl = document.getElementById('amount');
-  const nameEl = document.getElementById('name');
-  const phoneEl = document.getElementById('phone');
-  const emailEl = document.getElementById('email');
-
-  const detailsForm = document.getElementById('detailsForm');
-  const otpSection = document.getElementById('otpSection');
-
-  const msg1 = document.getElementById('msg1');
-  const ok1 = document.getElementById('ok1');
-  const msg2 = document.getElementById('msg2');
-  const ok2 = document.getElementById('ok2');
-
-  const sendOtpBtn = document.getElementById('sendOtpBtn');
-  const verifyBtn = document.getElementById('verifyBtn');
+  const nextResendAt = ${Number(flow.nextResendAt || 0)};
   const resendBtn = document.getElementById('resendBtn');
-  const otpEl = document.getElementById('otp');
   const timerEl = document.getElementById('timer');
 
-  const payForm = document.getElementById('payForm');
-  const pay_orderId = document.getElementById('pay_orderId');
-  const pay_amount = document.getElementById('pay_amount');
-  const pay_name = document.getElementById('pay_name');
-  const pay_email = document.getElementById('pay_email');
-  const pay_otp_token = document.getElementById('pay_otp_token');
-
-  function show(el, txt){
-    el.classList.remove('hidden');
-    el.textContent = txt || '';
-  }
-  function hide(el){
-    el.classList.add('hidden');
-    el.textContent = '';
-  }
-
-  function keyForState(orderId){
-    return "hataboon_otp_state_" + orderId;
-  }
-
-  function saveState(orderId, state){
-    try{ sessionStorage.setItem(keyForState(orderId), JSON.stringify(state)); }catch(e){}
-  }
-  function loadState(orderId){
-    try{
-      const s = sessionStorage.getItem(keyForState(orderId));
-      return s ? JSON.parse(s) : null;
-    }catch(e){ return null; }
-  }
-  function clearState(orderId){
-    try{ sessionStorage.removeItem(keyForState(orderId)); }catch(e){}
-  }
-
-  let timerInt = null;
-  function startTimer(expAtMs){
-    if(timerInt) clearInterval(timerInt);
-    function tick(){
-      const left = Math.max(0, expAtMs - Date.now());
-      const sec = Math.floor(left/1000);
-      const m = String(Math.floor(sec/60)).padStart(2,'0');
-      const s = String(sec%60).padStart(2,'0');
-      timerEl.textContent = left>0 ? ("תוקף הקוד: " + m + ":" + s) : "פג תוקף הקוד. לחץ 'שלח שוב קוד'";
-      if(left<=0){
-        clearInterval(timerInt);
-        timerInt = null;
-      }
-    }
-    tick();
-    timerInt = setInterval(tick, 500);
-  }
-
-  function setButtonsLocked(isLocked){
-    sendOtpBtn.disabled = isLocked;
-    resendBtn.disabled = isLocked;
-    verifyBtn.disabled = isLocked;
-  }
-
-  async function postJson(url, bodyObj){
-    const res = await fetch(url, {
-      method:'POST',
-      headers:{'Content-Type':'application/json'},
-      body: JSON.stringify(bodyObj)
-    });
-    const txt = await res.text();
-    let obj = null;
-    try{ obj = JSON.parse(txt); }catch(e){ obj = { ok:false, error: txt || ('HTTP '+res.status) }; }
-    if(!res.ok && obj && obj.ok !== true){
-      return obj;
-    }
-    return obj;
-  }
-
-  function readForm(){
-    return {
-      orderId: String(orderIdEl.value||'').trim(),
-      amount: String(amountEl.value||'').trim(),
-      name: String(nameEl.value||'').trim(),
-      phone: String(phoneEl.value||'').trim(),
-      email: String(emailEl.value||'').trim(),
-    };
-  }
-
-  (function restore(){
-    const orderId = String(orderIdEl.value||'').trim();
-    const st = loadState(orderId);
-    if(st && st.step === 'otp_sent' && st.expAt && Date.now() < st.expAt){
-      otpSection.classList.remove('hidden');
-      startTimer(st.expAt);
-      show(ok1, "כבר שלחנו קוד לוואטסאפ. הזן את הקוד כדי להמשיך.");
-      hide(msg1);
-    }
-  })();
-
-  detailsForm.addEventListener('submit', async (e) => {
-    e.preventDefault();
-    hide(msg1); hide(ok1); hide(msg2); hide(ok2);
-
-    const f = readForm();
-    if(!f.orderId){ show(msg1,'חסר מספר הזמנה'); return; }
-    if(!f.amount){ show(msg1,'חסר סכום'); return; }
-    if(!f.name){ show(msg1,'חסר שם'); return; }
-    if(!f.phone){ show(msg1,'חסר טלפון'); return; }
-
-    const st = loadState(f.orderId);
-    if(st && st.step === 'otp_sent' && st.expAt && Date.now() < st.expAt){
-      otpSection.classList.remove('hidden');
-      startTimer(st.expAt);
-      show(ok1, "כבר שלחנו קוד לוואטסאפ. הזן את הקוד כדי להמשיך.");
+  function tick(){
+    const left = Math.max(0, nextResendAt - Date.now());
+    if(left <= 0){
+      resendBtn.disabled = false;
+      timerEl.textContent = "אפשר לשלוח קוד חדש";
       return;
     }
+    const totalSec = Math.ceil(left / 1000);
+    const mm = String(Math.floor(totalSec / 60)).padStart(2,'0');
+    const ss = String(totalSec % 60).padStart(2,'0');
+    resendBtn.disabled = true;
+    timerEl.textContent = "שליחה מחדש תתאפשר בעוד: " + mm + ":" + ss;
+  }
 
-    try{
-      setButtonsLocked(true);
-
-      const resp = await postJson("/otp/request", { phone: f.phone, orderId: f.orderId });
-
-      if(!resp || resp.ok !== true){
-        show(msg1, (resp && resp.error) ? resp.error : 'שגיאה בשליחת קוד');
-        return;
-      }
-
-      const expAt = Date.now() + ((resp.expSeconds ? Number(resp.expSeconds) : 300) * 1000);
-
-      saveState(f.orderId, { step:'otp_sent', expAt });
-
-      otpSection.classList.remove('hidden');
-      startTimer(expAt);
-      show(ok1, "קוד נשלח לוואטסאפ ✅");
-      hide(msg1);
-
-    } catch(err){
-      show(msg1, 'שגיאה בשליחת קוד');
-    } finally {
-      setButtonsLocked(false);
-    }
-  });
-
-  resendBtn.addEventListener('click', async () => {
-    hide(msg1); hide(ok1); hide(msg2); hide(ok2);
-
-    const f = readForm();
-    if(!f.phone){ show(msg2,'חסר טלפון'); return; }
-
-    try{
-      setButtonsLocked(true);
-
-      const resp = await postJson("/otp/request", { phone: f.phone, orderId: f.orderId });
-
-      if(!resp || resp.ok !== true){
-        show(msg2, (resp && resp.error) ? resp.error : 'שגיאה בשליחת קוד');
-        return;
-      }
-
-      const expAt = Date.now() + ((resp.expSeconds ? Number(resp.expSeconds) : 300) * 1000);
-      saveState(f.orderId, { step:'otp_sent', expAt });
-
-      startTimer(expAt);
-      show(ok2, "קוד חדש נשלח ✅");
-      hide(msg2);
-
-    } catch(err){
-      show(msg2, 'שגיאה בשליחת קוד');
-    } finally {
-      setButtonsLocked(false);
-    }
-  });
-
-  verifyBtn.addEventListener('click', async () => {
-    hide(msg2); hide(ok2);
-
-    const f = readForm();
-    const otp = String(otpEl.value||'').replace(/\\D/g,'').slice(0,4);
-    if(otp.length !== 4){
-      show(msg2, 'נא להזין 4 ספרות');
-      return;
-    }
-
-    try{
-      setButtonsLocked(true);
-
-      const resp = await postJson("/otp/verify", { phone: f.phone, orderId: f.orderId, code: otp });
-
-      if(!resp || resp.ok !== true){
-        show(msg2, (resp && resp.error) ? resp.error : 'קוד לא תקין');
-        return;
-      }
-
-      const phone972 = resp.phone972 || '';
-      if(!phone972){
-        show(msg2, 'שגיאה באימות');
-        return;
-      }
-
-      const tokenResp = await postJson("/otp/issue-token", {
-        orderId: f.orderId,
-        phone972: phone972
-      });
-
-      if(!tokenResp || tokenResp.ok !== true || !tokenResp.token){
-        show(msg2, 'שגיאה פנימית: לא הצלחתי להפיק טוקן');
-        return;
-      }
-
-      pay_orderId.value = f.orderId;
-      pay_amount.value = f.amount;
-      pay_name.value = f.name;
-      pay_email.value = f.email;
-      pay_otp_token.value = tokenResp.token;
-
-      clearState(f.orderId);
-
-      detailsForm.classList.add('hidden');
-      payForm.classList.remove('hidden');
-
-      show(ok2, "אימות הצליח ✅ אפשר להמשיך לתשלום");
-
-    } catch(err){
-      show(msg2, 'שגיאה באימות');
-    } finally {
-      setButtonsLocked(false);
-    }
-  });
-
+  tick();
+  setInterval(tick, 500);
 })();
 </script>
-
 </body>
 </html>
 `;
+}
 
-  res.type("html").send(html);
+// ====== HOME ======
+app.get("/", (req, res) => {
+  res.send("Hataboon Payment Server Running 🍕");
 });
 
-// ====== Issue signed token after OTP verified ======
+// ====== PAYMENT PAGE ======
+app.get("/pay/:orderId/:amount", (req, res) => {
+  const orderId = cleanOrderId(req.params.orderId);
+  const amount = toAmountNumber(req.params.amount);
+
+  if (!orderId || !Number.isFinite(amount) || amount <= 0) {
+    return res.status(400).send("Invalid parameters");
+  }
+
+  const otpMissing = !otpConfigOk();
+  return res.type("html").send(renderPaymentPage({ orderId, amount, otpMissing }));
+});
+
+// ====== START OTP FLOW ======
+app.post("/otp/start", async (req, res) => {
+  try {
+    if (!otpConfigOk()) {
+      return res.status(500).send("OTP config missing");
+    }
+
+    const orderId = cleanOrderId(req.body?.orderId);
+    const amount = toAmountNumber(req.body?.amount);
+    const name = String(req.body?.name || "").trim();
+    const phone = String(req.body?.phone || "").trim();
+    const email = String(req.body?.email || "").trim();
+
+    if (!orderId) return res.status(400).send("חסר מספר הזמנה");
+    if (!Number.isFinite(amount) || amount <= 0) return res.status(400).send("סכום לא תקין");
+    if (!name) return res.status(400).send("חסר שם");
+    if (!phone) return res.status(400).send("חסר טלפון");
+
+    const otpResp = await requestOtp(phone, orderId);
+
+    if (!otpResp.data || otpResp.data.ok !== true) {
+      return res.status(400).send("שגיאה בשליחת קוד");
+    }
+
+    const flowId = randomId();
+    const waitMinutes = resendWaitMinutesByCount(0);
+
+    setFlow(flowId, {
+      createdAt: Date.now(),
+      orderId,
+      amount,
+      name,
+      phone,
+      email,
+      resendCount: 0,
+      nextResendAt: Date.now() + waitMinutes * 60 * 1000,
+    });
+
+    return res.redirect("/otp/" + flowId);
+  } catch (err) {
+    console.error("otp/start error:", err);
+    return res.status(500).send("שגיאה בשליחת קוד");
+  }
+});
+
+// ====== OTP PAGE ======
+app.get("/otp/:flowId", (req, res) => {
+  const flowId = String(req.params.flowId || "");
+  const flow = getFlow(flowId);
+
+  if (!flow) {
+    return res.status(404).send("תוקף האימות פג. חזור להתחלה.");
+  }
+
+  return res.type("html").send(
+    renderOtpPage({
+      flow,
+      flowId,
+      error: String(req.query.error || ""),
+      success: String(req.query.success || ""),
+    })
+  );
+});
+
+// ====== RESEND OTP ======
+app.post("/otp/:flowId/resend", async (req, res) => {
+  try {
+    const flowId = String(req.params.flowId || "");
+    const flow = getFlow(flowId);
+
+    if (!flow) {
+      return res.status(404).send("תוקף האימות פג. חזור להתחלה.");
+    }
+
+    const now = Date.now();
+    if ((flow.nextResendAt || 0) > now) {
+      return res.redirect("/otp/" + flowId + "?error=" + encodeURIComponent("עדיין אי אפשר לשלוח שוב קוד"));
+    }
+
+    const otpResp = await requestOtp(flow.phone, flow.orderId);
+
+    if (!otpResp.data || otpResp.data.ok !== true) {
+      return res.redirect("/otp/" + flowId + "?error=" + encodeURIComponent("שגיאה בשליחת קוד חדש"));
+    }
+
+    flow.resendCount = Number(flow.resendCount || 0) + 1;
+    const waitMinutes = resendWaitMinutesByCount(flow.resendCount);
+    flow.nextResendAt = Date.now() + waitMinutes * 60 * 1000;
+    setFlow(flowId, flow);
+
+    return res.redirect("/otp/" + flowId + "?success=" + encodeURIComponent("קוד חדש נשלח"));
+  } catch (err) {
+    console.error("otp resend error:", err);
+    return res.redirect("/otp/" + req.params.flowId + "?error=" + encodeURIComponent("שגיאה בשליחת קוד חדש"));
+  }
+});
+
+// ====== VERIFY OTP AND GO TO Z-CREDIT ======
+app.post("/otp/:flowId/verify", async (req, res) => {
+  try {
+    if (!otpConfigOk()) {
+      return res.status(500).send("OTP config missing");
+    }
+
+    const flowId = String(req.params.flowId || "");
+    const flow = getFlow(flowId);
+
+    if (!flow) {
+      return res.status(404).send("תוקף האימות פג. חזור להתחלה.");
+    }
+
+    const code = String(req.body?.code || "").replace(/\D/g, "").slice(0, 4);
+    if (code.length !== 4) {
+      return res.redirect("/otp/" + flowId + "?error=" + encodeURIComponent("נא להזין 4 ספרות"));
+    }
+
+    const verifyResp = await verifyOtp(flow.phone, flow.orderId, code);
+
+    if (!verifyResp.data || verifyResp.data.ok !== true || verifyResp.data.verified !== true) {
+      return res.redirect("/otp/" + flowId + "?error=" + encodeURIComponent("קוד לא תקין"));
+    }
+
+    const phone972 = String(verifyResp.data.phone972 || "");
+    if (!phone972) {
+      return res.redirect("/otp/" + flowId + "?error=" + encodeURIComponent("שגיאה באימות"));
+    }
+
+    const otpToken = hmacSign({
+      orderId: flow.orderId,
+      phone972,
+      exp: Date.now() + 10 * 60 * 1000,
+    });
+
+    const zcreditUrl = await createZCreditSession({
+      orderId: flow.orderId,
+      amount: flow.amount,
+      name: flow.name,
+      email: flow.email,
+      phone972,
+      otp_token: otpToken,
+    });
+
+    otpFlows.delete(flowId);
+    return res.redirect(zcreditUrl);
+  } catch (err) {
+    console.error("otp verify/redirect error:", err);
+    return res.redirect("/otp/" + req.params.flowId + "?error=" + encodeURIComponent("שגיאה במעבר לתשלום"));
+  }
+});
+
+// ====== ISSUE SIGNED TOKEN (נשאר לתאימות) ======
 app.post("/otp/issue-token", (req, res) => {
   try {
     if (!otpConfigOk()) {
@@ -604,7 +736,7 @@ app.post("/otp/issue-token", (req, res) => {
   }
 });
 
-// ====== CREATE SESSION ======
+// ====== CREATE SESSION (נשאר לתאימות) ======
 app.post("/create-session", async (req, res) => {
   try {
     if (!BASE_URL || !ZC_KEY) {
@@ -640,62 +772,15 @@ app.post("/create-session", async (req, res) => {
       return res.status(400).send("OTP phone invalid");
     }
 
-    const uniqueId = "order-" + cleanId + "-" + Date.now();
+    const zcreditUrl = await createZCreditSession({
+      orderId: cleanId,
+      amount: total,
+      name: customerName,
+      email,
+      phone972,
+    });
 
-    const cleanEmail = String(email || "").trim();
-
-    const customer = {
-      Name: customerName,
-      PhoneNumber: phone972,
-      ...(cleanEmail ? { Email: cleanEmail } : {}),
-    };
-
-    const payload = {
-      Key: String(ZC_KEY),
-
-      ...(ZC_TERMINAL ? { TerminalNumber: String(ZC_TERMINAL) } : {}),
-      ...(ZC_PASSWORD ? { Password: String(ZC_PASSWORD) } : {}),
-
-      UniqueID: uniqueId,
-      CallBackUrl: BASE_URL + "/zc-callback",
-      SuccessUrl: BASE_URL + "/payment-success?orderId=" + cleanId,
-      CancelUrl: BASE_URL + "/payment-cancel?orderId=" + cleanId,
-
-      Currency: "ILS",
-      Total: total,
-      AdjustAmount: true,
-      ShowCart: false,
-      AdditionalText: cleanId,
-
-      Customer: customer,
-
-      CartItems: [
-        {
-          Description: "תשלום להזמנה " + cleanId,
-          Quantity: 1,
-          UnitPrice: total,
-          Amount: total,
-          Currency: "ILS",
-        },
-      ],
-    };
-
-    const response = await fetch(
-      "https://pci.zcredit.co.il/webcheckout/api/WebCheckout/CreateSession",
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      }
-    );
-
-    const data = await response.json();
-
-    if (data?.Data?.SessionUrl) {
-      return res.redirect(data.Data.SessionUrl);
-    }
-
-    return res.status(400).json(data);
+    return res.redirect(zcreditUrl);
   } catch (err) {
     console.error("create-session error:", err);
     return res.status(500).send("Server error");
