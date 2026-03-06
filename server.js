@@ -17,16 +17,11 @@ const ZC_PASSWORD = process.env.ZC_PASSWORD;
 const OTP_SERVER_URL = (process.env.OTP_SERVER_URL || "").trim();
 const OTP_SIGNING_SECRET = process.env.OTP_SIGNING_SECRET || "";
 
-// =========================
-// זמני נעילה לשליחה מחדש
-// =========================
-const RESEND_LOCKS_MINUTES = [5, 10, 15]; // ראשונה 5, שנייה 10, שלישית+ 15
-const FLOW_TTL_MINUTES = 60; // נשמור flow עד שעה בזיכרון
+const RESEND_LOCKS_MINUTES = [5, 10, 15];
+const FLOW_TTL_MINUTES = 60;
 
-// flow store בזיכרון השרת
 const otpFlows = new Map();
 
-// ===== Helpers =====
 function cleanOrderId(v) {
   return String(v || "").replace(/\D/g, "");
 }
@@ -118,19 +113,11 @@ function resendWaitMinutesByCount(resendCount) {
   return RESEND_LOCKS_MINUTES[2];
 }
 
-function formatRemainingMs(ms) {
-  const left = Math.max(0, ms);
-  const totalSec = Math.ceil(left / 1000);
-  const mm = String(Math.floor(totalSec / 60)).padStart(2, "0");
-  const ss = String(totalSec % 60).padStart(2, "0");
-  return `${mm}:${ss}`;
-}
-
-async function requestOtp(phone, orderId) {
+async function requestOtp(phone, orderId, mode = "auto") {
   const response = await fetch(otpBaseUrl() + "/otp/request", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ phone, orderId }),
+    body: JSON.stringify({ phone, orderId, mode }),
   });
 
   const text = await response.text();
@@ -299,6 +286,10 @@ function renderPaymentPage({ orderId, amount, otpMissing = false }) {
   button:hover{
     background:#a00000;
   }
+  button[disabled]{
+    background:#999;
+    cursor:not-allowed;
+  }
   .footer-note{
     text-align:center;
     margin-top:12px;
@@ -315,6 +306,29 @@ function renderPaymentPage({ orderId, amount, otpMissing = false }) {
     margin:10px 0 16px;
     font-weight:700;
   }
+  .loadingBox{
+    display:none;
+    margin-top:16px;
+    text-align:center;
+  }
+  .spinner{
+    width:36px;
+    height:36px;
+    border:4px solid #eee;
+    border-top:4px solid #c40000;
+    border-radius:50%;
+    animation:spin 0.9s linear infinite;
+    margin:0 auto 10px;
+  }
+  .loadingText{
+    font-size:14px;
+    color:#555;
+    font-weight:700;
+  }
+  @keyframes spin{
+    0%{transform:rotate(0deg);}
+    100%{transform:rotate(360deg);}
+  }
 </style>
 </head>
 
@@ -329,7 +343,7 @@ function renderPaymentPage({ orderId, amount, otpMissing = false }) {
 
     ${otpMissing ? `<div class="warn">⚠️ חסר OTP_SERVER_URL או OTP_SIGNING_SECRET ב-Railway</div>` : ``}
 
-    <form method="POST" action="/otp/start">
+    <form method="POST" action="/otp/start" id="startForm">
       <input type="hidden" name="orderId" value="${htmlEscape(orderId)}" />
 
       <label>סכום לתשלום (₪)</label>
@@ -344,27 +358,38 @@ function renderPaymentPage({ orderId, amount, otpMissing = false }) {
       <label>אימייל (לצורך חשבונית בלבד)</label>
       <input type="email" name="email" placeholder="לא חובה" />
 
-      <button type="submit">שלח קוד אימות לוואטסאפ</button>
+      <button type="submit" id="sendBtn">שלח קוד אימות לוואטסאפ</button>
     </form>
+
+    <div class="loadingBox" id="loadingBox">
+      <div class="spinner"></div>
+      <div class="loadingText">שולחים קוד, נא להמתין...</div>
+    </div>
 
     <div class="footer-note">
       לפני התשלום יישלח קוד אימות לוואטסאפ כדי לוודא שהטלפון נכון ✅
     </div>
 
   </div>
+
+<script>
+(function(){
+  const form = document.getElementById('startForm');
+  const btn = document.getElementById('sendBtn');
+  const loadingBox = document.getElementById('loadingBox');
+
+  form.addEventListener('submit', function(){
+    btn.disabled = true;
+    loadingBox.style.display = 'block';
+  });
+})();
+</script>
 </body>
 </html>
 `;
 }
 
 function renderOtpPage({ flow, flowId, error = "", success = "" }) {
-  const now = Date.now();
-  const waitMs = Math.max(0, (flow.nextResendAt || 0) - now);
-  const canResend = waitMs <= 0;
-  const resendCount = Number(flow.resendCount || 0);
-
-  const nextWaitMinutes = resendWaitMinutesByCount(resendCount);
-
   return `
 <!doctype html>
 <html lang="he" dir="rtl">
@@ -477,6 +502,29 @@ function renderOtpPage({ flow, flowId, error = "", success = "" }) {
     color:#777;
     line-height:1.45;
   }
+  .loadingBox{
+    display:none;
+    margin-top:14px;
+    text-align:center;
+  }
+  .spinner{
+    width:32px;
+    height:32px;
+    border:4px solid #eee;
+    border-top:4px solid #c40000;
+    border-radius:50%;
+    animation:spin 0.9s linear infinite;
+    margin:0 auto 10px;
+  }
+  .loadingText{
+    font-size:14px;
+    color:#555;
+    font-weight:700;
+  }
+  @keyframes spin{
+    0%{transform:rotate(0deg);}
+    100%{transform:rotate(360deg);}
+  }
 </style>
 </head>
 
@@ -485,30 +533,37 @@ function renderOtpPage({ flow, flowId, error = "", success = "" }) {
     <h1>אימות קוד</h1>
 
     <div class="sub">
-      שלחנו קוד אימות לוואטסאפ.<br/>
+      שלחנו קוד אימות.<br/>
       הזן כאן את הקוד כדי להמשיך לתשלום.
     </div>
 
     ${error ? `<div class="error">${htmlEscape(error)}</div>` : ``}
     ${success ? `<div class="success">${htmlEscape(success)}</div>` : ``}
 
-    <form method="POST" action="/otp/${htmlEscape(flowId)}/verify">
+    <form method="POST" action="/otp/${htmlEscape(flowId)}/verify" id="verifyForm">
       <label>קוד אימות (4 ספרות)</label>
       <input name="code" inputmode="numeric" maxlength="4" placeholder="••••" required />
-      <button type="submit">אישור</button>
+      <button type="submit" id="verifyBtn">אישור</button>
     </form>
+
+    <div class="loadingBox" id="verifyLoadingBox">
+      <div class="spinner"></div>
+      <div class="loadingText">מאמתים קוד, נא להמתין...</div>
+    </div>
 
     <div class="timer" id="timer"></div>
 
     <form method="POST" action="/otp/${htmlEscape(flowId)}/resend">
-      <button type="submit" id="resendBtn" class="secondary" ${canResend ? "" : "disabled"}>
-        שלח קוד חדש
+      <button type="submit" id="resendBtn" class="secondary">
+        שלח קוד בSMS
       </button>
     </form>
 
     <div class="small">
-      שליחה מחדש אפשרית רק לאחר ההמתנה.<br/>
-      ההמתנה הבאה אחרי שליחה תהיה ${nextWaitMinutes} דקות.
+      השליחה ב־SMS נעולה בהדרגה:<br/>
+      אחרי שליחה ראשונה: 5 דקות<br/>
+      אחרי שנייה: 10 דקות<br/>
+      אחרי שלישית והלאה: 15 דקות
     </div>
   </div>
 
@@ -522,18 +577,27 @@ function renderOtpPage({ flow, flowId, error = "", success = "" }) {
     const left = Math.max(0, nextResendAt - Date.now());
     if(left <= 0){
       resendBtn.disabled = false;
-      timerEl.textContent = "אפשר לשלוח קוד חדש";
+      timerEl.textContent = "אפשר לשלוח קוד בSMS";
       return;
     }
     const totalSec = Math.ceil(left / 1000);
     const mm = String(Math.floor(totalSec / 60)).padStart(2,'0');
     const ss = String(totalSec % 60).padStart(2,'0');
     resendBtn.disabled = true;
-    timerEl.textContent = "שליחה מחדש תתאפשר בעוד: " + mm + ":" + ss;
+    timerEl.textContent = "שליחה בSMS תתאפשר בעוד: " + mm + ":" + ss;
   }
 
   tick();
   setInterval(tick, 500);
+
+  const verifyForm = document.getElementById('verifyForm');
+  const verifyBtn = document.getElementById('verifyBtn');
+  const verifyLoadingBox = document.getElementById('verifyLoadingBox');
+
+  verifyForm.addEventListener('submit', function(){
+    verifyBtn.disabled = true;
+    verifyLoadingBox.style.display = 'block';
+  });
 })();
 </script>
 </body>
@@ -577,7 +641,7 @@ app.post("/otp/start", async (req, res) => {
     if (!name) return res.status(400).send("חסר שם");
     if (!phone) return res.status(400).send("חסר טלפון");
 
-    const otpResp = await requestOtp(phone, orderId);
+    const otpResp = await requestOtp(phone, orderId, "auto");
 
     if (!otpResp.data || otpResp.data.ok !== true) {
       return res.status(400).send("שגיאה בשליחת קוד");
@@ -623,7 +687,7 @@ app.get("/otp/:flowId", (req, res) => {
   );
 });
 
-// ====== RESEND OTP ======
+// ====== RESEND OTP AS SMS ======
 app.post("/otp/:flowId/resend", async (req, res) => {
   try {
     const flowId = String(req.params.flowId || "");
@@ -635,13 +699,13 @@ app.post("/otp/:flowId/resend", async (req, res) => {
 
     const now = Date.now();
     if ((flow.nextResendAt || 0) > now) {
-      return res.redirect("/otp/" + flowId + "?error=" + encodeURIComponent("עדיין אי אפשר לשלוח שוב קוד"));
+      return res.redirect("/otp/" + flowId + "?error=" + encodeURIComponent("עדיין אי אפשר לשלוח קוד בSMS"));
     }
 
-    const otpResp = await requestOtp(flow.phone, flow.orderId);
+    const otpResp = await requestOtp(flow.phone, flow.orderId, "sms");
 
     if (!otpResp.data || otpResp.data.ok !== true) {
-      return res.redirect("/otp/" + flowId + "?error=" + encodeURIComponent("שגיאה בשליחת קוד חדש"));
+      return res.redirect("/otp/" + flowId + "?error=" + encodeURIComponent("שגיאה בשליחת קוד בSMS"));
     }
 
     flow.resendCount = Number(flow.resendCount || 0) + 1;
@@ -649,10 +713,10 @@ app.post("/otp/:flowId/resend", async (req, res) => {
     flow.nextResendAt = Date.now() + waitMinutes * 60 * 1000;
     setFlow(flowId, flow);
 
-    return res.redirect("/otp/" + flowId + "?success=" + encodeURIComponent("קוד חדש נשלח"));
+    return res.redirect("/otp/" + flowId + "?success=" + encodeURIComponent("קוד חדש נשלח בSMS"));
   } catch (err) {
     console.error("otp resend error:", err);
-    return res.redirect("/otp/" + req.params.flowId + "?error=" + encodeURIComponent("שגיאה בשליחת קוד חדש"));
+    return res.redirect("/otp/" + req.params.flowId + "?error=" + encodeURIComponent("שגיאה בשליחת קוד בSMS"));
   }
 });
 
@@ -686,19 +750,12 @@ app.post("/otp/:flowId/verify", async (req, res) => {
       return res.redirect("/otp/" + flowId + "?error=" + encodeURIComponent("שגיאה באימות"));
     }
 
-    const otpToken = hmacSign({
-      orderId: flow.orderId,
-      phone972,
-      exp: Date.now() + 10 * 60 * 1000,
-    });
-
     const zcreditUrl = await createZCreditSession({
       orderId: flow.orderId,
       amount: flow.amount,
       name: flow.name,
       email: flow.email,
       phone972,
-      otp_token: otpToken,
     });
 
     otpFlows.delete(flowId);
@@ -709,7 +766,7 @@ app.post("/otp/:flowId/verify", async (req, res) => {
   }
 });
 
-// ====== ISSUE SIGNED TOKEN (נשאר לתאימות) ======
+// ====== ISSUE SIGNED TOKEN ======
 app.post("/otp/issue-token", (req, res) => {
   try {
     if (!otpConfigOk()) {
@@ -736,7 +793,7 @@ app.post("/otp/issue-token", (req, res) => {
   }
 });
 
-// ====== CREATE SESSION (נשאר לתאימות) ======
+// ====== CREATE SESSION ======
 app.post("/create-session", async (req, res) => {
   try {
     if (!BASE_URL || !ZC_KEY) {
