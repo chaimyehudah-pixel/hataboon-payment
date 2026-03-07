@@ -17,8 +17,8 @@ const ZC_PASSWORD = process.env.ZC_PASSWORD;
 const OTP_SERVER_URL = (process.env.OTP_SERVER_URL || "").trim();
 const OTP_SIGNING_SECRET = process.env.OTP_SIGNING_SECRET || "";
 
-const RESEND_LOCKS_MINUTES = [5, 10, 15];
 const FLOW_TTL_MINUTES = 60;
+const OTP_ACTIVE_WINDOW_MS = 5 * 60 * 1000;
 
 const otpFlows = new Map();
 
@@ -107,10 +107,21 @@ function setFlow(flowId, flow) {
   otpFlows.set(flowId, flow);
 }
 
-function resendWaitMinutesByCount(resendCount) {
-  if (resendCount <= 0) return RESEND_LOCKS_MINUTES[0];
-  if (resendCount === 1) return RESEND_LOCKS_MINUTES[1];
-  return RESEND_LOCKS_MINUTES[2];
+function findActiveFlow(orderId, phone) {
+  cleanupOldFlows();
+  const cleanId = cleanOrderId(orderId);
+  const cleanPhone = String(phone || "").trim();
+
+  for (const [flowId, flow] of otpFlows.entries()) {
+    if (!flow) continue;
+    if (flow.orderId !== cleanId) continue;
+    if (String(flow.phone || "").trim() !== cleanPhone) continue;
+    if (!flow.otpExpiresAt) continue;
+    if (Date.now() >= flow.otpExpiresAt) continue;
+    return { flowId, flow };
+  }
+
+  return null;
 }
 
 async function requestOtp(phone, orderId, mode = "auto") {
@@ -290,13 +301,6 @@ function renderPaymentPage({ orderId, amount, otpMissing = false }) {
     background:#999;
     cursor:not-allowed;
   }
-  .footer-note{
-    text-align:center;
-    margin-top:12px;
-    font-size:13px;
-    color:#777;
-    line-height:1.45;
-  }
   .warn{
     background:#fff3cd;
     border:1px solid #ffe69c;
@@ -355,19 +359,15 @@ function renderPaymentPage({ orderId, amount, otpMissing = false }) {
       <label>טלפון</label>
       <input name="phone" required />
 
-      <label>אימייל (לצורך חשבונית בלבד)</label>
+      <label>אימייל (לצורך קבלה בלבד)</label>
       <input type="email" name="email" placeholder="לא חובה" />
 
-      <button type="submit" id="sendBtn">שלח קוד אימות לוואטסאפ</button>
+      <button type="submit" id="sendBtn">שלח קוד אימות</button>
     </form>
 
     <div class="loadingBox" id="loadingBox">
       <div class="spinner"></div>
       <div class="loadingText">שולחים קוד, נא להמתין...</div>
-    </div>
-
-    <div class="footer-note">
-      לפני התשלום יישלח קוד אימות לוואטסאפ כדי לוודא שהטלפון נכון ✅
     </div>
 
   </div>
@@ -464,12 +464,6 @@ function renderOtpPage({ flow, flowId, error = "", success = "" }) {
   button:hover{
     background:#a00000;
   }
-  button.secondary{
-    background:#444;
-  }
-  button.secondary:hover{
-    background:#2d2d2d;
-  }
   button[disabled]{
     background:#aaa;
     cursor:not-allowed;
@@ -494,13 +488,6 @@ function renderOtpPage({ flow, flowId, error = "", success = "" }) {
     font-size:15px;
     font-weight:700;
     color:#444;
-  }
-  .small{
-    margin-top:12px;
-    text-align:center;
-    font-size:13px;
-    color:#777;
-    line-height:1.45;
   }
   .loadingBox{
     display:none;
@@ -533,7 +520,6 @@ function renderOtpPage({ flow, flowId, error = "", success = "" }) {
     <h1>אימות קוד</h1>
 
     <div class="sub">
-      שלחנו קוד אימות.<br/>
       הזן כאן את הקוד כדי להמשיך לתשלום.
     </div>
 
@@ -552,39 +538,22 @@ function renderOtpPage({ flow, flowId, error = "", success = "" }) {
     </div>
 
     <div class="timer" id="timer"></div>
-
-    <form method="POST" action="/otp/${htmlEscape(flowId)}/resend">
-      <button type="submit" id="resendBtn" class="secondary">
-        שלח קוד בSMS
-      </button>
-    </form>
-
-    <div class="small">
-      השליחה ב־SMS נעולה בהדרגה:<br/>
-      אחרי שליחה ראשונה: 5 דקות<br/>
-      אחרי שנייה: 10 דקות<br/>
-      אחרי שלישית והלאה: 15 דקות
-    </div>
   </div>
 
 <script>
 (function(){
-  const nextResendAt = ${Number(flow.nextResendAt || 0)};
-  const resendBtn = document.getElementById('resendBtn');
+  const otpExpiresAt = ${Number(flow.otpExpiresAt || 0)};
   const timerEl = document.getElementById('timer');
 
   function tick(){
-    const left = Math.max(0, nextResendAt - Date.now());
-    if(left <= 0){
-      resendBtn.disabled = false;
-      timerEl.textContent = "אפשר לשלוח קוד בSMS";
-      return;
-    }
+    const left = Math.max(0, otpExpiresAt - Date.now());
     const totalSec = Math.ceil(left / 1000);
     const mm = String(Math.floor(totalSec / 60)).padStart(2,'0');
     const ss = String(totalSec % 60).padStart(2,'0');
-    resendBtn.disabled = true;
-    timerEl.textContent = "שליחה בSMS תתאפשר בעוד: " + mm + ":" + ss;
+    timerEl.textContent = "תוקף הקוד: " + mm + ":" + ss;
+    if(left <= 0){
+      timerEl.textContent = "תוקף הקוד: 00:00";
+    }
   }
 
   tick();
@@ -641,6 +610,11 @@ app.post("/otp/start", async (req, res) => {
     if (!name) return res.status(400).send("חסר שם");
     if (!phone) return res.status(400).send("חסר טלפון");
 
+    const existing = findActiveFlow(orderId, phone);
+    if (existing) {
+      return res.redirect("/otp/" + existing.flowId);
+    }
+
     const otpResp = await requestOtp(phone, orderId, "auto");
 
     if (!otpResp.data || otpResp.data.ok !== true) {
@@ -648,7 +622,7 @@ app.post("/otp/start", async (req, res) => {
     }
 
     const flowId = randomId();
-    const waitMinutes = resendWaitMinutesByCount(0);
+    const expSeconds = Number(otpResp.data.expSeconds || otpResp.data.expiresInSeconds || 300);
 
     setFlow(flowId, {
       createdAt: Date.now(),
@@ -657,8 +631,7 @@ app.post("/otp/start", async (req, res) => {
       name,
       phone,
       email,
-      resendCount: 0,
-      nextResendAt: Date.now() + waitMinutes * 60 * 1000,
+      otpExpiresAt: Date.now() + expSeconds * 1000,
     });
 
     return res.redirect("/otp/" + flowId);
@@ -685,39 +658,6 @@ app.get("/otp/:flowId", (req, res) => {
       success: String(req.query.success || ""),
     })
   );
-});
-
-// ====== RESEND OTP AS SMS ======
-app.post("/otp/:flowId/resend", async (req, res) => {
-  try {
-    const flowId = String(req.params.flowId || "");
-    const flow = getFlow(flowId);
-
-    if (!flow) {
-      return res.status(404).send("תוקף האימות פג. חזור להתחלה.");
-    }
-
-    const now = Date.now();
-    if ((flow.nextResendAt || 0) > now) {
-      return res.redirect("/otp/" + flowId + "?error=" + encodeURIComponent("עדיין אי אפשר לשלוח קוד בSMS"));
-    }
-
-    const otpResp = await requestOtp(flow.phone, flow.orderId, "sms");
-
-    if (!otpResp.data || otpResp.data.ok !== true) {
-      return res.redirect("/otp/" + flowId + "?error=" + encodeURIComponent("שגיאה בשליחת קוד בSMS"));
-    }
-
-    flow.resendCount = Number(flow.resendCount || 0) + 1;
-    const waitMinutes = resendWaitMinutesByCount(flow.resendCount);
-    flow.nextResendAt = Date.now() + waitMinutes * 60 * 1000;
-    setFlow(flowId, flow);
-
-    return res.redirect("/otp/" + flowId + "?success=" + encodeURIComponent("קוד חדש נשלח בSMS"));
-  } catch (err) {
-    console.error("otp resend error:", err);
-    return res.redirect("/otp/" + req.params.flowId + "?error=" + encodeURIComponent("שגיאה בשליחת קוד בSMS"));
-  }
 });
 
 // ====== VERIFY OTP AND GO TO Z-CREDIT ======
