@@ -18,9 +18,13 @@ const OTP_SERVER_URL = (process.env.OTP_SERVER_URL || "").trim();
 const OTP_SIGNING_SECRET = process.env.OTP_SIGNING_SECRET || "";
 
 const FLOW_TTL_MINUTES = 60;
-const OTP_ACTIVE_WINDOW_MS = 5 * 60 * 1000;
 
+// flow של קוד אימות
 const otpFlows = new Map();
+
+// שמירת נתוני תשלום זמניים/מאושרים להצגת "קבלה"
+const paymentReceiptsByUniqueId = new Map();
+const paymentReceiptsByOrderId = new Map();
 
 function cleanOrderId(v) {
   return String(v || "").replace(/\D/g, "");
@@ -98,6 +102,21 @@ function cleanupOldFlows() {
   }
 }
 
+function cleanupOldReceipts() {
+  const now = Date.now();
+  const maxAgeMs = 2 * 24 * 60 * 60 * 1000; // יומיים
+  for (const [uniqueId, rec] of paymentReceiptsByUniqueId.entries()) {
+    if (!rec || !rec.createdAt || now - rec.createdAt > maxAgeMs) {
+      paymentReceiptsByUniqueId.delete(uniqueId);
+    }
+  }
+  for (const [orderId, rec] of paymentReceiptsByOrderId.entries()) {
+    if (!rec || !rec.createdAt || now - rec.createdAt > maxAgeMs) {
+      paymentReceiptsByOrderId.delete(orderId);
+    }
+  }
+}
+
 function getFlow(flowId) {
   cleanupOldFlows();
   return otpFlows.get(flowId) || null;
@@ -162,7 +181,132 @@ async function verifyOtp(phone, orderId, code) {
   return { status: response.status, data };
 }
 
-async function createZCreditSession({ orderId, amount, name, email, phone972 }) {
+function deepGetFirst(source, keys) {
+  if (!source || typeof source !== "object") return "";
+  const queue = [source];
+  const wanted = keys.map(k => String(k).toLowerCase());
+
+  while (queue.length) {
+    const obj = queue.shift();
+    if (!obj || typeof obj !== "object") continue;
+
+    for (const [k, v] of Object.entries(obj)) {
+      if (wanted.includes(String(k).toLowerCase()) && v !== undefined && v !== null && String(v).trim() !== "") {
+        return String(v);
+      }
+    }
+
+    for (const v of Object.values(obj)) {
+      if (v && typeof v === "object") queue.push(v);
+    }
+  }
+
+  return "";
+}
+
+function normalizeReceiptData(rawBody, fallback = {}) {
+  const body = rawBody || {};
+
+  const data = {
+    customerName: fallback.customerName || "",
+    orderId: fallback.orderId || "",
+    uniqueId:
+      deepGetFirst(body, ["UniqueID", "UniqueId", "uid", "UID"]) ||
+      fallback.uniqueId ||
+      "",
+    terminalName:
+      deepGetFirst(body, ["TerminalName", "terminalName", "Terminal", "terminal"]) ||
+      "הטאבון",
+    terminalNumber:
+      deepGetFirst(body, ["TerminalNumber", "terminalNumber"]) ||
+      fallback.terminalNumber ||
+      "",
+    softwareVersion:
+      deepGetFirst(body, ["SoftwareVersion", "softwareVersion", "Version", "version"]) ||
+      "",
+    merchantNumber:
+      deepGetFirst(body, ["MerchantNumber", "merchantNumber", "MerchantId", "merchantId", "CardComNumber", "BusinessNumber"]) ||
+      "",
+    transactionDateTime:
+      deepGetFirst(body, ["TransactionDateTime", "transactionDateTime", "TransactionTime", "transactionTime", "DateTime", "dateTime"]) ||
+      deepGetFirst(body, ["CreateDate", "createDate", "Date", "date"]) ||
+      "",
+    cardName:
+      deepGetFirst(body, ["CardName", "cardName", "CardBrand", "cardBrand", "Brand", "brand"]) ||
+      "",
+    cardNumberLast4:
+      deepGetFirst(body, ["CardNumber", "cardNumber", "Pan", "pan", "Last4Digits", "last4Digits", "CardMask", "cardMask"]) ||
+      "",
+    voucherNumber:
+      deepGetFirst(body, ["VoucherNumber", "voucherNumber", "Shovar", "shovar", "ReceiptNumber", "receiptNumber", "ReferenceNumber", "referenceNumber"]) ||
+      "",
+    uid:
+      deepGetFirst(body, ["UID", "uid", "UniqueID", "UniqueId"]) ||
+      fallback.uniqueId ||
+      "",
+    rrn:
+      deepGetFirst(body, ["RRN", "rrn"]) ||
+      "",
+    transactionType:
+      deepGetFirst(body, ["TransactionType", "transactionType", "DealType", "dealType"]) ||
+      "",
+    issuerApprovalNumber:
+      deepGetFirst(body, ["ApprovalNumber", "approvalNumber", "IssuerApprovalNumber", "issuerApprovalNumber", "ApprovalCode", "approvalCode"]) ||
+      "",
+    approver:
+      deepGetFirst(body, ["Approver", "approver", "Authorizer", "authorizer", "ApprovalEntity", "approvalEntity"]) ||
+      "",
+    executionMethod:
+      deepGetFirst(body, ["ExecutionMethod", "executionMethod", "EntryMode", "entryMode"]) ||
+      "",
+    creditType:
+      deepGetFirst(body, ["CreditType", "creditType", "PaymentType", "paymentType"]) ||
+      "",
+    amount:
+      deepGetFirst(body, ["Amount", "amount", "Total", "total", "TransactionAmount", "transactionAmount"]) ||
+      (fallback.amount !== undefined ? String(fallback.amount) : ""),
+    currency:
+      deepGetFirst(body, ["Currency", "currency"]) ||
+      "ש\"ח",
+    approvalStatus:
+      deepGetFirst(body, ["Status", "status", "ResponseMessage", "responseMessage", "ReturnMessage", "returnMessage"]) ||
+      "התשלום בוצע בהצלחה",
+  };
+
+  if (data.cardNumberLast4) {
+    const digits = data.cardNumberLast4.replace(/[^\d]/g, "");
+    if (digits.length >= 4) {
+      data.cardNumberLast4 = digits.slice(-4);
+    }
+  }
+
+  return data;
+}
+
+function saveReceipt(uniqueId, orderId, receipt) {
+  const full = {
+    ...receipt,
+    uniqueId: uniqueId || receipt.uniqueId || "",
+    orderId: orderId || receipt.orderId || "",
+    createdAt: receipt.createdAt || Date.now(),
+  };
+
+  if (full.uniqueId) paymentReceiptsByUniqueId.set(full.uniqueId, full);
+  if (full.orderId) paymentReceiptsByOrderId.set(full.orderId, full);
+}
+
+function getReceipt(uniqueId, orderId) {
+  cleanupOldReceipts();
+  if (uniqueId && paymentReceiptsByUniqueId.has(uniqueId)) {
+    return paymentReceiptsByUniqueId.get(uniqueId);
+  }
+  if (orderId && paymentReceiptsByOrderId.has(orderId)) {
+    return paymentReceiptsByOrderId.get(orderId);
+  }
+  return null;
+}
+
+async function createZCreditSession({ orderId, amount, name, phone972 }) {
   if (!BASE_URL || !ZC_KEY) {
     throw new Error("Missing BASE_URL or ZC_KEY in Railway.");
   }
@@ -182,12 +326,22 @@ async function createZCreditSession({ orderId, amount, name, email, phone972 }) 
   }
 
   const uniqueId = "order-" + cleanId + "-" + Date.now();
-  const cleanEmail = String(email || "").trim();
+
+  saveReceipt(uniqueId, cleanId, {
+    customerName,
+    orderId: cleanId,
+    uniqueId,
+    amount: total.toFixed(2),
+    currency: "ש\"ח",
+    approvalStatus: "ממתין לאישור סופי",
+    terminalName: "הטאבון",
+    terminalNumber: String(ZC_TERMINAL || ""),
+    createdAt: Date.now(),
+  });
 
   const customer = {
     Name: customerName,
     PhoneNumber: String(phone972),
-    ...(cleanEmail ? { Email: cleanEmail } : {}),
   };
 
   const payload = {
@@ -198,8 +352,8 @@ async function createZCreditSession({ orderId, amount, name, email, phone972 }) 
 
     UniqueID: uniqueId,
     CallBackUrl: BASE_URL + "/zc-callback",
-    SuccessUrl: BASE_URL + "/payment-success?orderId=" + cleanId,
-    CancelUrl: BASE_URL + "/payment-cancel?orderId=" + cleanId,
+    SuccessUrl: BASE_URL + "/payment-success?orderId=" + cleanId + "&uniqueId=" + encodeURIComponent(uniqueId),
+    CancelUrl: BASE_URL + "/payment-cancel?orderId=" + cleanId + "&uniqueId=" + encodeURIComponent(uniqueId),
 
     Currency: "ILS",
     Total: total,
@@ -232,7 +386,7 @@ async function createZCreditSession({ orderId, amount, name, email, phone972 }) 
   const data = await response.json();
 
   if (data?.Data?.SessionUrl) {
-    return data.Data.SessionUrl;
+    return { sessionUrl: data.Data.SessionUrl, uniqueId };
   }
 
   throw new Error(JSON.stringify(data));
@@ -358,9 +512,6 @@ function renderPaymentPage({ orderId, amount, otpMissing = false }) {
 
       <label>טלפון</label>
       <input name="phone" required />
-
-      <label>אימייל (לצורך קבלה בלבד)</label>
-      <input type="email" name="email" placeholder="לא חובה" />
 
       <button type="submit" id="sendBtn">שלח קוד אימות</button>
     </form>
@@ -574,6 +725,234 @@ function renderOtpPage({ flow, flowId, error = "", success = "" }) {
 `;
 }
 
+function renderSuccessReceipt({ receipt, orderId, uniqueId }) {
+  const r = receipt || {};
+
+  function row(label, value) {
+    const v = value && String(value).trim() !== "" ? String(value) : "-";
+    return `
+      <div class="row">
+        <div class="label">${htmlEscape(label)}</div>
+        <div class="value">${htmlEscape(v)}</div>
+      </div>
+    `;
+  }
+
+  return `
+<!doctype html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>אישור תשלום</title>
+
+<style>
+  body{
+    font-family:Arial,Helvetica,sans-serif;
+    background:#f3f3f3;
+    margin:0;
+    padding:24px;
+    color:#222;
+  }
+  .receipt{
+    max-width:760px;
+    margin:0 auto;
+    background:#fff;
+    border-radius:18px;
+    padding:28px;
+    box-shadow:0 10px 30px rgba(0,0,0,.10);
+    border:1px solid #e8e8e8;
+  }
+  .logo{
+    text-align:center;
+    margin-bottom:14px;
+  }
+  .logo img{
+    max-width:240px;
+    height:auto;
+  }
+  .title{
+    text-align:center;
+    font-size:30px;
+    font-weight:900;
+    margin:8px 0 22px;
+  }
+  .ok{
+    text-align:center;
+    color:#0a7a2f;
+    font-size:18px;
+    font-weight:800;
+    margin-bottom:20px;
+  }
+  .topBox{
+    background:#fafafa;
+    border:1px solid #ececec;
+    border-radius:14px;
+    padding:14px 16px;
+    margin-bottom:20px;
+  }
+  .topLine{
+    display:flex;
+    justify-content:space-between;
+    gap:16px;
+    margin:8px 0;
+    font-size:16px;
+    flex-wrap:wrap;
+  }
+  .topLine .k{
+    font-weight:800;
+  }
+  .rows{
+    border-top:1px dashed #ddd;
+    margin-top:16px;
+    padding-top:10px;
+  }
+  .row{
+    display:grid;
+    grid-template-columns: 1fr 1.4fr;
+    gap:14px;
+    padding:10px 0;
+    border-bottom:1px solid #f0f0f0;
+    align-items:start;
+  }
+  .label{
+    font-weight:800;
+    color:#444;
+  }
+  .value{
+    color:#111;
+    word-break:break-word;
+  }
+  .amountBox{
+    margin-top:18px;
+    background:#fff8f8;
+    border:1px solid #ffd9d9;
+    border-radius:14px;
+    padding:16px;
+    text-align:center;
+  }
+  .amountTitle{
+    font-size:15px;
+    color:#555;
+    margin-bottom:6px;
+    font-weight:700;
+  }
+  .amountValue{
+    font-size:34px;
+    font-weight:900;
+    color:#b00020;
+  }
+  .foot{
+    margin-top:20px;
+    text-align:center;
+    color:#666;
+    font-size:13px;
+    line-height:1.5;
+  }
+  @media (max-width: 640px){
+    .row{
+      grid-template-columns: 1fr;
+      gap:6px;
+    }
+    .title{
+      font-size:24px;
+    }
+    .amountValue{
+      font-size:28px;
+    }
+  }
+</style>
+</head>
+<body>
+  <div class="receipt">
+    <div class="logo">
+      <img src="/logo.jpeg" alt="הטאבון">
+    </div>
+
+    <div class="title">אישור תשלום</div>
+    <div class="ok">התשלום בוצע בהצלחה ✅</div>
+
+    <div class="topBox">
+      <div class="topLine"><span class="k">לכבוד:</span> <span>${htmlEscape(r.customerName || "-")}</span></div>
+      <div class="topLine"><span class="k">מספר הזמנה:</span> <span>${htmlEscape(orderId || r.orderId || "-")}</span></div>
+      <div class="topLine"><span class="k">מספר זיהוי:</span> <span>${htmlEscape(uniqueId || r.uniqueId || "-")}</span></div>
+    </div>
+
+    <div class="rows">
+      ${row("שם מסוף", r.terminalName)}
+      ${row("מספר מסוף", r.terminalNumber)}
+      ${row("גרסת תוכנה", r.softwareVersion)}
+      ${row("מספר עסק בחברת האשראי", r.merchantNumber)}
+      ${row("תאריך ושעת העסקה", r.transactionDateTime)}
+      ${row("שם כרטיס", r.cardName)}
+      ${row("מספר כרטיס", r.cardNumberLast4)}
+      ${row("מספר שובר", r.voucherNumber)}
+      ${row("UID", r.uid)}
+      ${row("RRN", r.rrn)}
+      ${row("סוג עסקה", r.transactionType)}
+      ${row("מספר אישור מנפיק", r.issuerApprovalNumber)}
+      ${row("גורם מאשר", r.approver)}
+      ${row("אופן ביצוע העסקה", r.executionMethod)}
+      ${row("סוג אשראי", r.creditType)}
+      ${row("מטבע", r.currency)}
+      ${row("סטטוס", r.approvalStatus)}
+    </div>
+
+    <div class="amountBox">
+      <div class="amountTitle">סכום העסקה</div>
+      <div class="amountValue">${htmlEscape(r.amount || "-")} ${htmlEscape(r.currency || "")}</div>
+    </div>
+
+    <div class="foot">
+      מסמך זה מהווה אישור תשלום שהופק ממערכת הסליקה.<br/>
+      תודה שבחרתם בהטאבון 🍕
+    </div>
+  </div>
+</body>
+</html>
+`;
+}
+
+function renderCancelPage(orderId) {
+  return `
+<!doctype html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>התשלום בוטל</title>
+<style>
+  body{
+    font-family:Arial,Helvetica,sans-serif;
+    background:#f4f4f4;
+    margin:0;
+    padding:24px;
+  }
+  .card{
+    max-width:520px;
+    margin:60px auto;
+    background:#fff;
+    border-radius:18px;
+    padding:30px;
+    box-shadow:0 10px 30px rgba(0,0,0,.10);
+    text-align:center;
+  }
+  .logo img{max-width:220px;height:auto;}
+  h1{margin:20px 0 10px;font-size:28px;}
+  p{font-size:16px;color:#555;}
+</style>
+</head>
+<body>
+  <div class="card">
+    <div class="logo"><img src="/logo.jpeg" alt="הטאבון"></div>
+    <h1>התשלום בוטל ❌</h1>
+    <p>מספר הזמנה: ${htmlEscape(orderId || "-")}</p>
+  </div>
+</body>
+</html>
+`;
+}
+
 // ====== HOME ======
 app.get("/", (req, res) => {
   res.send("Hataboon Payment Server Running 🍕");
@@ -603,7 +982,6 @@ app.post("/otp/start", async (req, res) => {
     const amount = toAmountNumber(req.body?.amount);
     const name = String(req.body?.name || "").trim();
     const phone = String(req.body?.phone || "").trim();
-    const email = String(req.body?.email || "").trim();
 
     if (!orderId) return res.status(400).send("חסר מספר הזמנה");
     if (!Number.isFinite(amount) || amount <= 0) return res.status(400).send("סכום לא תקין");
@@ -630,7 +1008,6 @@ app.post("/otp/start", async (req, res) => {
       amount,
       name,
       phone,
-      email,
       otpExpiresAt: Date.now() + expSeconds * 1000,
     });
 
@@ -690,16 +1067,15 @@ app.post("/otp/:flowId/verify", async (req, res) => {
       return res.redirect("/otp/" + flowId + "?error=" + encodeURIComponent("שגיאה באימות"));
     }
 
-    const zcreditUrl = await createZCreditSession({
+    const created = await createZCreditSession({
       orderId: flow.orderId,
       amount: flow.amount,
       name: flow.name,
-      email: flow.email,
       phone972,
     });
 
     otpFlows.delete(flowId);
-    return res.redirect(zcreditUrl);
+    return res.redirect(created.sessionUrl);
   } catch (err) {
     console.error("otp verify/redirect error:", err);
     return res.redirect("/otp/" + req.params.flowId + "?error=" + encodeURIComponent("שגיאה במעבר לתשלום"));
@@ -744,7 +1120,7 @@ app.post("/create-session", async (req, res) => {
       return res.status(500).send("Missing OTP_SERVER_URL or OTP_SIGNING_SECRET in Railway.");
     }
 
-    const { orderId, amount, name, email, otp_token } = req.body;
+    const { orderId, amount, name, otp_token } = req.body;
 
     const cleanId = cleanOrderId(orderId);
     const total = toAmountNumber(amount);
@@ -769,15 +1145,14 @@ app.post("/create-session", async (req, res) => {
       return res.status(400).send("OTP phone invalid");
     }
 
-    const zcreditUrl = await createZCreditSession({
+    const created = await createZCreditSession({
       orderId: cleanId,
       amount: total,
       name: customerName,
-      email,
       phone972,
     });
 
-    return res.redirect(zcreditUrl);
+    return res.redirect(created.sessionUrl);
   } catch (err) {
     console.error("create-session error:", err);
     return res.status(500).send("Server error");
@@ -786,21 +1161,86 @@ app.post("/create-session", async (req, res) => {
 
 // ====== CALLBACK ======
 app.all("/zc-callback", (req, res) => {
-  console.log("========== ZC CALLBACK ==========");
-  console.log("Time:", new Date().toISOString());
-  console.log("Body:", req.body);
-  console.log("================================");
+  try {
+    const body = req.body || {};
+
+    const uniqueId =
+      deepGetFirst(body, ["UniqueID", "UniqueId", "uid", "UID"]) || "";
+    const orderId =
+      cleanOrderId(
+        deepGetFirst(body, ["AdditionalText", "additionalText", "OrderId", "orderId"])
+      ) || "";
+
+    const existing = getReceipt(uniqueId, orderId) || {};
+
+    const receipt = normalizeReceiptData(body, {
+      customerName: existing.customerName || "",
+      orderId: orderId || existing.orderId || "",
+      uniqueId: uniqueId || existing.uniqueId || "",
+      amount: existing.amount || "",
+      terminalNumber: existing.terminalNumber || String(ZC_TERMINAL || ""),
+    });
+
+    saveReceipt(uniqueId || existing.uniqueId || "", orderId || existing.orderId || "", {
+      ...existing,
+      ...receipt,
+      rawBody: body,
+      createdAt: existing.createdAt || Date.now(),
+    });
+
+    console.log("========== ZC CALLBACK ==========");
+    console.log("Time:", new Date().toISOString());
+    console.log("Body:", body);
+    console.log("================================");
+  } catch (err) {
+    console.error("zc-callback error:", err);
+  }
+
   res.status(200).send("OK");
 });
 
 // ====== SUCCESS ======
 app.get("/payment-success", (req, res) => {
-  res.send("התשלום בוצע בהצלחה ✅ הזמנה: " + (req.query.orderId || ""));
+  const orderId = cleanOrderId(req.query.orderId || "");
+  const uniqueId = String(req.query.uniqueId || "").trim();
+
+  const receipt = getReceipt(uniqueId, orderId) || {
+    customerName: "",
+    orderId,
+    uniqueId,
+    terminalName: "הטאבון",
+    terminalNumber: String(ZC_TERMINAL || ""),
+    softwareVersion: "",
+    merchantNumber: "",
+    transactionDateTime: "",
+    cardName: "",
+    cardNumberLast4: "",
+    voucherNumber: "",
+    uid: uniqueId,
+    rrn: "",
+    transactionType: "",
+    issuerApprovalNumber: "",
+    approver: "",
+    executionMethod: "",
+    creditType: "",
+    amount: "",
+    currency: "ש\"ח",
+    approvalStatus: "התשלום בוצע בהצלחה",
+  };
+
+  return res.type("html").send(
+    renderSuccessReceipt({
+      receipt,
+      orderId,
+      uniqueId,
+    })
+  );
 });
 
 // ====== CANCEL ======
 app.get("/payment-cancel", (req, res) => {
-  res.send("התשלום בוטל ❌");
+  const orderId = cleanOrderId(req.query.orderId || "");
+  return res.type("html").send(renderCancelPage(orderId));
 });
 
 app.listen(PORT, () => {
