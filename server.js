@@ -19,10 +19,18 @@ const OTP_SIGNING_SECRET = process.env.OTP_SIGNING_SECRET || "";
 
 const FLOW_TTL_MINUTES = 60;
 
-// flow של קוד אימות
-const otpFlows = new Map();
+// קבועים להצגת "קבלה" יפה וברורה
+const RECEIPT_TERMINAL_NAME = process.env.RECEIPT_TERMINAL_NAME || "הטאבון";
+const RECEIPT_TERMINAL_NUMBER = process.env.RECEIPT_TERMINAL_NUMBER || "2666131";
+const RECEIPT_SOFTWARE_VERSION = process.env.RECEIPT_SOFTWARE_VERSION || "WEB001630i";
+const RECEIPT_MERCHANT_NUMBER = process.env.RECEIPT_MERCHANT_NUMBER || "5927439";
+const RECEIPT_DEFAULT_EXECUTION_METHOD = process.env.RECEIPT_DEFAULT_EXECUTION_METHOD || "עסקה טלפונית";
+const RECEIPT_DEFAULT_APPROVER = process.env.RECEIPT_DEFAULT_APPROVER || "חברה";
+const RECEIPT_DEFAULT_TRANSACTION_TYPE = process.env.RECEIPT_DEFAULT_TRANSACTION_TYPE || "חובה";
+const RECEIPT_DEFAULT_CREDIT_TYPE = process.env.RECEIPT_DEFAULT_CREDIT_TYPE || "רגיל";
+const RECEIPT_DEFAULT_CURRENCY = process.env.RECEIPT_DEFAULT_CURRENCY || `ש"ח`;
 
-// שמירת נתוני תשלום זמניים/מאושרים להצגת "קבלה"
+const otpFlows = new Map();
 const paymentReceiptsByUniqueId = new Map();
 const paymentReceiptsByOrderId = new Map();
 
@@ -104,7 +112,7 @@ function cleanupOldFlows() {
 
 function cleanupOldReceipts() {
   const now = Date.now();
-  const maxAgeMs = 2 * 24 * 60 * 60 * 1000; // יומיים
+  const maxAgeMs = 2 * 24 * 60 * 60 * 1000;
   for (const [uniqueId, rec] of paymentReceiptsByUniqueId.entries()) {
     if (!rec || !rec.createdAt || now - rec.createdAt > maxAgeMs) {
       paymentReceiptsByUniqueId.delete(uniqueId);
@@ -204,80 +212,156 @@ function deepGetFirst(source, keys) {
   return "";
 }
 
+function formatDateTimeValue(v) {
+  const s = String(v || "").trim();
+  if (!s) return "";
+
+  if (/^\d{4}-\d{2}-\d{2}T/.test(s)) {
+    const d = new Date(s);
+    if (!Number.isNaN(d.getTime())) {
+      const dd = String(d.getDate()).padStart(2, "0");
+      const mm = String(d.getMonth() + 1).padStart(2, "0");
+      const yy = String(d.getFullYear()).slice(-2);
+      const hh = String(d.getHours()).padStart(2, "0");
+      const mi = String(d.getMinutes()).padStart(2, "0");
+      return `${dd}/${mm}/${yy} ${hh}:${mi}`;
+    }
+  }
+
+  if (/^\d{14}$/.test(s)) {
+    const yyyy = s.slice(0, 4);
+    const mm = s.slice(4, 6);
+    const dd = s.slice(6, 8);
+    const hh = s.slice(8, 10);
+    const mi = s.slice(10, 12);
+    return `${dd}/${mm}/${yyyy.slice(-2)} ${hh}:${mi}`;
+  }
+
+  return s;
+}
+
+function formatAmountValue(v) {
+  const s = String(v || "").trim();
+  if (!s) return "";
+  const num = Number(s);
+  if (Number.isFinite(num)) return num.toFixed(2);
+  return s;
+}
+
+function formatCurrencyValue(v) {
+  const s = String(v || "").trim().toUpperCase();
+  if (!s) return RECEIPT_DEFAULT_CURRENCY;
+  if (s === "ILS") return RECEIPT_DEFAULT_CURRENCY;
+  return String(v);
+}
+
+function formatCreditTypeValue(v) {
+  const s = String(v || "").trim();
+  if (!s) return RECEIPT_DEFAULT_CREDIT_TYPE;
+  if (s === "1") return "רגיל";
+  if (/regular/i.test(s)) return "רגיל";
+  return s;
+}
+
 function normalizeReceiptData(rawBody, fallback = {}) {
   const body = rawBody || {};
+
+  const terminalNumberRaw =
+    deepGetFirst(body, ["TerminalNumber", "terminalNumber", "TerminalNo", "terminalNo"]) ||
+    fallback.terminalNumber ||
+    RECEIPT_TERMINAL_NUMBER;
 
   const data = {
     customerName: fallback.customerName || "",
     orderId: fallback.orderId || "",
     uniqueId:
-      deepGetFirst(body, ["UniqueID", "UniqueId", "uid", "UID"]) ||
+      deepGetFirst(body, ["UniqueID", "UniqueId"]) ||
       fallback.uniqueId ||
       "",
     terminalName:
-      deepGetFirst(body, ["TerminalName", "terminalName", "Terminal", "terminal"]) ||
-      "הטאבון",
-    terminalNumber:
-      deepGetFirst(body, ["TerminalNumber", "terminalNumber"]) ||
-      fallback.terminalNumber ||
-      "",
+      deepGetFirst(body, ["TerminalName", "terminalName", "Terminal"]) ||
+      fallback.terminalName ||
+      RECEIPT_TERMINAL_NAME,
+    terminalNumber: String(terminalNumberRaw || "").trim(),
     softwareVersion:
       deepGetFirst(body, ["SoftwareVersion", "softwareVersion", "Version", "version"]) ||
-      "",
+      fallback.softwareVersion ||
+      RECEIPT_SOFTWARE_VERSION,
     merchantNumber:
-      deepGetFirst(body, ["MerchantNumber", "merchantNumber", "MerchantId", "merchantId", "CardComNumber", "BusinessNumber"]) ||
-      "",
-    transactionDateTime:
-      deepGetFirst(body, ["TransactionDateTime", "transactionDateTime", "TransactionTime", "transactionTime", "DateTime", "dateTime"]) ||
-      deepGetFirst(body, ["CreateDate", "createDate", "Date", "date"]) ||
-      "",
+      deepGetFirst(body, ["MerchantNumber", "merchantNumber", "MerchantId", "merchantId", "BusinessNumber"]) ||
+      fallback.merchantNumber ||
+      RECEIPT_MERCHANT_NUMBER,
+    transactionDateTime: formatDateTimeValue(
+      deepGetFirst(body, [
+        "TransactionDateTime",
+        "transactionDateTime",
+        "TransactionTime",
+        "transactionTime",
+        "DealDateTime",
+        "dealDateTime",
+        "CreateDate",
+        "createDate",
+        "Date",
+        "date",
+      ]) || fallback.transactionDateTime
+    ),
     cardName:
-      deepGetFirst(body, ["CardName", "cardName", "CardBrand", "cardBrand", "Brand", "brand"]) ||
+      deepGetFirst(body, ["CardName", "cardName", "CardBrand", "cardBrand", "CardTypeName", "cardTypeName"]) ||
+      fallback.cardName ||
       "",
     cardNumberLast4:
-      deepGetFirst(body, ["CardNumber", "cardNumber", "Pan", "pan", "Last4Digits", "last4Digits", "CardMask", "cardMask"]) ||
+      deepGetFirst(body, ["CardLast4Digits", "cardLast4Digits", "Last4", "last4", "CardNumber", "cardNumber", "Pan", "pan", "CardMask", "cardMask"]) ||
+      fallback.cardNumberLast4 ||
       "",
     voucherNumber:
-      deepGetFirst(body, ["VoucherNumber", "voucherNumber", "Shovar", "shovar", "ReceiptNumber", "receiptNumber", "ReferenceNumber", "referenceNumber"]) ||
+      deepGetFirst(body, ["VoucherNumber", "voucherNumber", "DocumentNumber", "documentNumber", "Shovar", "shovar", "ReceiptNumber", "receiptNumber"]) ||
+      fallback.voucherNumber ||
       "",
     uid:
-      deepGetFirst(body, ["UID", "uid", "UniqueID", "UniqueId"]) ||
-      fallback.uniqueId ||
+      deepGetFirst(body, ["UID", "uid", "TransactionUid", "transactionUid"]) ||
+      fallback.uid ||
       "",
     rrn:
-      deepGetFirst(body, ["RRN", "rrn"]) ||
+      deepGetFirst(body, ["RRN", "rrn", "RetrievalReferenceNumber", "retrievalReferenceNumber"]) ||
+      fallback.rrn ||
       "",
     transactionType:
-      deepGetFirst(body, ["TransactionType", "transactionType", "DealType", "dealType"]) ||
-      "",
+      deepGetFirst(body, ["TransactionType", "transactionType", "DealType", "dealType", "DebitCredit", "debitCredit"]) ||
+      fallback.transactionType ||
+      RECEIPT_DEFAULT_TRANSACTION_TYPE,
     issuerApprovalNumber:
       deepGetFirst(body, ["ApprovalNumber", "approvalNumber", "IssuerApprovalNumber", "issuerApprovalNumber", "ApprovalCode", "approvalCode"]) ||
+      fallback.issuerApprovalNumber ||
       "",
     approver:
-      deepGetFirst(body, ["Approver", "approver", "Authorizer", "authorizer", "ApprovalEntity", "approvalEntity"]) ||
-      "",
+      deepGetFirst(body, ["Approver", "approver", "ApproverName", "approverName", "ApprovalEntity", "approvalEntity", "Authorizer", "authorizer"]) ||
+      fallback.approver ||
+      RECEIPT_DEFAULT_APPROVER,
     executionMethod:
-      deepGetFirst(body, ["ExecutionMethod", "executionMethod", "EntryMode", "entryMode"]) ||
-      "",
-    creditType:
-      deepGetFirst(body, ["CreditType", "creditType", "PaymentType", "paymentType"]) ||
-      "",
-    amount:
+      deepGetFirst(body, ["ExecutionMethod", "executionMethod", "EntryMode", "entryMode", "TransactionChannel", "transactionChannel"]) ||
+      fallback.executionMethod ||
+      RECEIPT_DEFAULT_EXECUTION_METHOD,
+    creditType: formatCreditTypeValue(
+      deepGetFirst(body, ["CreditType", "creditType", "PaymentType", "paymentType", "CreditTerms", "creditTerms"]) ||
+      fallback.creditType
+    ),
+    amount: formatAmountValue(
       deepGetFirst(body, ["Amount", "amount", "Total", "total", "TransactionAmount", "transactionAmount"]) ||
-      (fallback.amount !== undefined ? String(fallback.amount) : ""),
-    currency:
+      fallback.amount
+    ),
+    currency: formatCurrencyValue(
       deepGetFirst(body, ["Currency", "currency"]) ||
-      "ש\"ח",
+      fallback.currency
+    ),
     approvalStatus:
       deepGetFirst(body, ["Status", "status", "ResponseMessage", "responseMessage", "ReturnMessage", "returnMessage"]) ||
+      fallback.approvalStatus ||
       "התשלום בוצע בהצלחה",
   };
 
   if (data.cardNumberLast4) {
-    const digits = data.cardNumberLast4.replace(/[^\d]/g, "");
-    if (digits.length >= 4) {
-      data.cardNumberLast4 = digits.slice(-4);
-    }
+    const digits = String(data.cardNumberLast4).replace(/[^\d]/g, "");
+    if (digits.length >= 4) data.cardNumberLast4 = digits.slice(-4);
   }
 
   return data;
@@ -306,6 +390,15 @@ function getReceipt(uniqueId, orderId) {
   return null;
 }
 
+function isReceiptComplete(receipt) {
+  if (!receipt) return false;
+  return Boolean(
+    String(receipt.transactionDateTime || "").trim() &&
+    String(receipt.voucherNumber || "").trim() &&
+    String(receipt.uid || "").trim()
+  );
+}
+
 async function createZCreditSession({ orderId, amount, name, phone972 }) {
   if (!BASE_URL || !ZC_KEY) {
     throw new Error("Missing BASE_URL or ZC_KEY in Railway.");
@@ -332,10 +425,16 @@ async function createZCreditSession({ orderId, amount, name, phone972 }) {
     orderId: cleanId,
     uniqueId,
     amount: total.toFixed(2),
-    currency: "ש\"ח",
+    currency: RECEIPT_DEFAULT_CURRENCY,
     approvalStatus: "ממתין לאישור סופי",
-    terminalName: "הטאבון",
-    terminalNumber: String(ZC_TERMINAL || ""),
+    terminalName: RECEIPT_TERMINAL_NAME,
+    terminalNumber: RECEIPT_TERMINAL_NUMBER,
+    softwareVersion: RECEIPT_SOFTWARE_VERSION,
+    merchantNumber: RECEIPT_MERCHANT_NUMBER,
+    executionMethod: RECEIPT_DEFAULT_EXECUTION_METHOD,
+    approver: RECEIPT_DEFAULT_APPROVER,
+    transactionType: RECEIPT_DEFAULT_TRANSACTION_TYPE,
+    creditType: RECEIPT_DEFAULT_CREDIT_TYPE,
     createdAt: Date.now(),
   });
 
@@ -725,7 +824,7 @@ function renderOtpPage({ flow, flowId, error = "", success = "" }) {
 `;
 }
 
-function renderSuccessReceipt({ receipt, orderId, uniqueId }) {
+function renderSuccessReceipt({ receipt, orderId, uniqueId, shouldAutoRefresh = false, refreshCount = 0 }) {
   const r = receipt || {};
 
   function row(label, value) {
@@ -745,75 +844,88 @@ function renderSuccessReceipt({ receipt, orderId, uniqueId }) {
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1" />
 <title>אישור תשלום</title>
+${shouldAutoRefresh ? `<meta http-equiv="refresh" content="1.2;url=/payment-success?orderId=${encodeURIComponent(orderId || "")}&uniqueId=${encodeURIComponent(uniqueId || "")}&r=${Number(refreshCount || 0) + 1}">` : ""}
 
 <style>
   body{
     font-family:Arial,Helvetica,sans-serif;
-    background:#f3f3f3;
+    background:#efefef;
     margin:0;
-    padding:24px;
+    padding:18px;
     color:#222;
   }
   .receipt{
-    max-width:760px;
+    max-width:620px;
     margin:0 auto;
     background:#fff;
     border-radius:18px;
-    padding:28px;
+    padding:20px 20px 18px;
     box-shadow:0 10px 30px rgba(0,0,0,.10);
     border:1px solid #e8e8e8;
   }
   .logo{
     text-align:center;
-    margin-bottom:14px;
+    margin-bottom:8px;
   }
   .logo img{
-    max-width:240px;
+    max-width:210px;
     height:auto;
   }
   .title{
     text-align:center;
-    font-size:30px;
+    font-size:26px;
     font-weight:900;
-    margin:8px 0 22px;
+    margin:8px 0 10px;
   }
   .ok{
     text-align:center;
     color:#0a7a2f;
-    font-size:18px;
+    font-size:17px;
     font-weight:800;
-    margin-bottom:20px;
+    margin-bottom:14px;
+  }
+  .wait{
+    text-align:center;
+    color:#8a6d3b;
+    background:#fff8e5;
+    border:1px solid #f1dfad;
+    border-radius:12px;
+    padding:10px 12px;
+    margin-bottom:14px;
+    font-weight:700;
+    font-size:14px;
   }
   .topBox{
     background:#fafafa;
     border:1px solid #ececec;
     border-radius:14px;
-    padding:14px 16px;
-    margin-bottom:20px;
+    padding:10px 12px;
+    margin-bottom:14px;
   }
   .topLine{
-    display:flex;
-    justify-content:space-between;
-    gap:16px;
-    margin:8px 0;
-    font-size:16px;
-    flex-wrap:wrap;
+    display:grid;
+    grid-template-columns: 120px 1fr;
+    gap:8px;
+    margin:4px 0;
+    font-size:15px;
+    align-items:center;
   }
   .topLine .k{
     font-weight:800;
+    color:#444;
   }
   .rows{
-    border-top:1px dashed #ddd;
-    margin-top:16px;
-    padding-top:10px;
+    margin-top:6px;
+    border-top:1px dashed #d8d8d8;
+    padding-top:6px;
   }
   .row{
     display:grid;
-    grid-template-columns: 1fr 1.4fr;
-    gap:14px;
-    padding:10px 0;
-    border-bottom:1px solid #f0f0f0;
-    align-items:start;
+    grid-template-columns: 170px 1fr;
+    gap:10px;
+    padding:6px 0;
+    border-bottom:1px solid #f2f2f2;
+    align-items:center;
   }
   .label{
     font-weight:800;
@@ -824,41 +936,49 @@ function renderSuccessReceipt({ receipt, orderId, uniqueId }) {
     word-break:break-word;
   }
   .amountBox{
-    margin-top:18px;
+    margin-top:14px;
     background:#fff8f8;
     border:1px solid #ffd9d9;
     border-radius:14px;
-    padding:16px;
+    padding:12px;
     text-align:center;
   }
   .amountTitle{
-    font-size:15px;
+    font-size:14px;
     color:#555;
-    margin-bottom:6px;
+    margin-bottom:4px;
     font-weight:700;
   }
   .amountValue{
-    font-size:34px;
+    font-size:30px;
     font-weight:900;
     color:#b00020;
+    line-height:1.1;
   }
   .foot{
-    margin-top:20px;
+    margin-top:14px;
     text-align:center;
     color:#666;
-    font-size:13px;
-    line-height:1.5;
+    font-size:12px;
+    line-height:1.45;
   }
   @media (max-width: 640px){
+    .receipt{
+      padding:16px 14px;
+    }
     .row{
-      grid-template-columns: 1fr;
-      gap:6px;
+      grid-template-columns: 135px 1fr;
+      gap:8px;
+      padding:5px 0;
+    }
+    .topLine{
+      grid-template-columns: 95px 1fr;
     }
     .title{
-      font-size:24px;
+      font-size:23px;
     }
     .amountValue{
-      font-size:28px;
+      font-size:26px;
     }
   }
 </style>
@@ -872,8 +992,10 @@ function renderSuccessReceipt({ receipt, orderId, uniqueId }) {
     <div class="title">אישור תשלום</div>
     <div class="ok">התשלום בוצע בהצלחה ✅</div>
 
+    ${shouldAutoRefresh ? `<div class="wait">מעדכן את נתוני הקבלה, נא להמתין...</div>` : ""}
+
     <div class="topBox">
-      <div class="topLine"><span class="k">לכבוד:</span> <span>${htmlEscape(r.customerName || "-")}</span></div>
+      <div class="topLine"><span class="k">שם:</span> <span>${htmlEscape(r.customerName || "-")}</span></div>
       <div class="topLine"><span class="k">מספר הזמנה:</span> <span>${htmlEscape(orderId || r.orderId || "-")}</span></div>
       <div class="topLine"><span class="k">מספר זיהוי:</span> <span>${htmlEscape(uniqueId || r.uniqueId || "-")}</span></div>
     </div>
@@ -1165,7 +1287,8 @@ app.all("/zc-callback", (req, res) => {
     const body = req.body || {};
 
     const uniqueId =
-      deepGetFirst(body, ["UniqueID", "UniqueId", "uid", "UID"]) || "";
+      deepGetFirst(body, ["UniqueID", "UniqueId"]) || "";
+
     const orderId =
       cleanOrderId(
         deepGetFirst(body, ["AdditionalText", "additionalText", "OrderId", "orderId"])
@@ -1178,7 +1301,15 @@ app.all("/zc-callback", (req, res) => {
       orderId: orderId || existing.orderId || "",
       uniqueId: uniqueId || existing.uniqueId || "",
       amount: existing.amount || "",
-      terminalNumber: existing.terminalNumber || String(ZC_TERMINAL || ""),
+      terminalNumber: existing.terminalNumber || RECEIPT_TERMINAL_NUMBER,
+      terminalName: existing.terminalName || RECEIPT_TERMINAL_NAME,
+      softwareVersion: existing.softwareVersion || RECEIPT_SOFTWARE_VERSION,
+      merchantNumber: existing.merchantNumber || RECEIPT_MERCHANT_NUMBER,
+      executionMethod: existing.executionMethod || RECEIPT_DEFAULT_EXECUTION_METHOD,
+      approver: existing.approver || RECEIPT_DEFAULT_APPROVER,
+      transactionType: existing.transactionType || RECEIPT_DEFAULT_TRANSACTION_TYPE,
+      creditType: existing.creditType || RECEIPT_DEFAULT_CREDIT_TYPE,
+      currency: existing.currency || RECEIPT_DEFAULT_CURRENCY,
     });
 
     saveReceipt(uniqueId || existing.uniqueId || "", orderId || existing.orderId || "", {
@@ -1203,36 +1334,41 @@ app.all("/zc-callback", (req, res) => {
 app.get("/payment-success", (req, res) => {
   const orderId = cleanOrderId(req.query.orderId || "");
   const uniqueId = String(req.query.uniqueId || "").trim();
+  const refreshCount = Math.max(0, Number(req.query.r || 0) || 0);
 
   const receipt = getReceipt(uniqueId, orderId) || {
     customerName: "",
     orderId,
     uniqueId,
-    terminalName: "הטאבון",
-    terminalNumber: String(ZC_TERMINAL || ""),
-    softwareVersion: "",
-    merchantNumber: "",
+    terminalName: RECEIPT_TERMINAL_NAME,
+    terminalNumber: RECEIPT_TERMINAL_NUMBER,
+    softwareVersion: RECEIPT_SOFTWARE_VERSION,
+    merchantNumber: RECEIPT_MERCHANT_NUMBER,
     transactionDateTime: "",
     cardName: "",
     cardNumberLast4: "",
     voucherNumber: "",
-    uid: uniqueId,
+    uid: "",
     rrn: "",
-    transactionType: "",
+    transactionType: RECEIPT_DEFAULT_TRANSACTION_TYPE,
     issuerApprovalNumber: "",
-    approver: "",
-    executionMethod: "",
-    creditType: "",
+    approver: RECEIPT_DEFAULT_APPROVER,
+    executionMethod: RECEIPT_DEFAULT_EXECUTION_METHOD,
+    creditType: RECEIPT_DEFAULT_CREDIT_TYPE,
     amount: "",
-    currency: "ש\"ח",
+    currency: RECEIPT_DEFAULT_CURRENCY,
     approvalStatus: "התשלום בוצע בהצלחה",
   };
+
+  const shouldAutoRefresh = !isReceiptComplete(receipt) && refreshCount < 8;
 
   return res.type("html").send(
     renderSuccessReceipt({
       receipt,
       orderId,
       uniqueId,
+      shouldAutoRefresh,
+      refreshCount,
     })
   );
 });
