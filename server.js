@@ -834,7 +834,88 @@ function renderOtpPage({ flow, flowId, error = "" }) {
 `;
 }
 
-function renderSuccessReceipt({ receipt, orderId, uniqueId, shouldAutoRefresh = false, refreshCount = 0 }) {
+function renderReceiptPendingPage({ orderId, uniqueId, refreshCount = 0 }) {
+  return `
+<!doctype html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>מעבד אישור תשלום</title>
+<meta http-equiv="refresh" content="1.2;url=/payment-success?orderId=${encodeURIComponent(orderId || "")}&uniqueId=${encodeURIComponent(uniqueId || "")}&r=${Number(refreshCount || 0) + 1}">
+
+<style>
+  body{
+    font-family:Arial,Helvetica,sans-serif;
+    background:#efefef;
+    margin:0;
+    padding:18px;
+    color:#222;
+  }
+  .card{
+    max-width:520px;
+    margin:60px auto;
+    background:#fff;
+    border-radius:18px;
+    padding:28px;
+    box-shadow:0 10px 30px rgba(0,0,0,.10);
+    border:1px solid #e8e8e8;
+    text-align:center;
+  }
+  .logo{
+    text-align:center;
+    margin-bottom:12px;
+  }
+  .logo img{
+    max-width:210px;
+    height:auto;
+  }
+  h1{
+    font-size:28px;
+    margin:8px 0 14px;
+  }
+  .spinner{
+    width:44px;
+    height:44px;
+    border:4px solid #eee;
+    border-top:4px solid #c40000;
+    border-radius:50%;
+    animation:spin 0.9s linear infinite;
+    margin:0 auto 14px;
+  }
+  .text{
+    font-size:18px;
+    font-weight:800;
+    color:#444;
+    line-height:1.5;
+  }
+  .sub{
+    margin-top:10px;
+    font-size:14px;
+    color:#777;
+  }
+  @keyframes spin{
+    0%{transform:rotate(0deg);}
+    100%{transform:rotate(360deg);}
+  }
+</style>
+</head>
+<body>
+  <div class="card">
+    <div class="logo">
+      <img src="/logo.jpeg" alt="הטאבון">
+    </div>
+    <h1>מעבד אישור תשלום</h1>
+    <div class="spinner"></div>
+    <div class="text">מעבד את אישור התשלום, נא להמתין...</div>
+    <div class="sub">מספר הזמנה: ${htmlEscape(orderId || "-")}</div>
+  </div>
+</body>
+</html>
+`;
+}
+
+function renderSuccessReceipt({ receipt, orderId }) {
   const r = receipt || {};
 
   function row(label, value) {
@@ -854,7 +935,6 @@ function renderSuccessReceipt({ receipt, orderId, uniqueId, shouldAutoRefresh = 
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1" />
 <title>אישור תשלום</title>
-${shouldAutoRefresh ? `<meta http-equiv="refresh" content="1.2;url=/payment-success?orderId=${encodeURIComponent(orderId || "")}&uniqueId=${encodeURIComponent(uniqueId || "")}&r=${Number(refreshCount || 0) + 1}">` : ""}
 
 <style>
   body{
@@ -893,17 +973,6 @@ ${shouldAutoRefresh ? `<meta http-equiv="refresh" content="1.2;url=/payment-succ
     font-size:17px;
     font-weight:800;
     margin-bottom:14px;
-  }
-  .wait{
-    text-align:center;
-    color:#8a6d3b;
-    background:#fff8e5;
-    border:1px solid #f1dfad;
-    border-radius:12px;
-    padding:10px 12px;
-    margin-bottom:14px;
-    font-weight:700;
-    font-size:14px;
   }
   .topBox{
     background:#fafafa;
@@ -996,8 +1065,6 @@ ${shouldAutoRefresh ? `<meta http-equiv="refresh" content="1.2;url=/payment-succ
     <div class="title">אישור תשלום</div>
     <div class="ok">התשלום בוצע בהצלחה ✅</div>
 
-    ${shouldAutoRefresh ? `<div class="wait">מעדכן את נתוני הקבלה, נא להמתין...</div>` : ""}
-
     <div class="topBox">
       <div class="topLine"><span class="k">שם:</span> <span>${htmlEscape(r.customerName || "-")}</span></div>
       <div class="topLine"><span class="k">טלפון:</span> <span>${htmlEscape(r.phone || "-")}</span></div>
@@ -1028,6 +1095,46 @@ ${shouldAutoRefresh ? `<meta http-equiv="refresh" content="1.2;url=/payment-succ
       מסמך זה מהווה אישור תשלום שהופק ממערכת הסליקה.<br/>
       תודה שבחרתם בהטאבון 🍕
     </div>
+  </div>
+</body>
+</html>
+`;
+}
+
+function renderReceiptNotReadyPage() {
+  return `
+<!doctype html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>אישור תשלום</title>
+<style>
+  body{
+    font-family:Arial,Helvetica,sans-serif;
+    background:#efefef;
+    margin:0;
+    padding:18px;
+  }
+  .card{
+    max-width:520px;
+    margin:60px auto;
+    background:#fff;
+    border-radius:18px;
+    padding:30px;
+    box-shadow:0 10px 30px rgba(0,0,0,.10);
+    text-align:center;
+  }
+  .logo img{max-width:220px;height:auto;}
+  h1{margin:20px 0 10px;font-size:28px;}
+  p{font-size:16px;color:#555;line-height:1.6;}
+</style>
+</head>
+<body>
+  <div class="card">
+    <div class="logo"><img src="/logo.jpeg" alt="הטאבון"></div>
+    <h1>אישור התשלום עדיין לא זמין</h1>
+    <p>אנא רענן את הדף בעוד מספר שניות.</p>
   </div>
 </body>
 </html>
@@ -1336,40 +1443,38 @@ app.get("/payment-success", (req, res) => {
   const uniqueId = String(req.query.uniqueId || "").trim();
   const refreshCount = Math.max(0, Number(req.query.r || 0) || 0);
 
-  const receipt = getReceipt(uniqueId, orderId) || {
-    customerName: "",
-    phone: "",
-    orderId,
-    uniqueId,
-    terminalName: RECEIPT_TERMINAL_NAME,
-    terminalNumber: RECEIPT_TERMINAL_NUMBER,
-    softwareVersion: RECEIPT_SOFTWARE_VERSION,
-    merchantNumber: RECEIPT_MERCHANT_NUMBER,
-    transactionDateTime: "",
-    cardName: "",
-    cardNumberLast4: "",
-    voucherNumber: "",
-    uid: "",
-    rrn: "",
-    transactionType: RECEIPT_DEFAULT_TRANSACTION_TYPE,
-    issuerApprovalNumber: "",
-    approver: RECEIPT_DEFAULT_APPROVER,
-    executionMethod: RECEIPT_DEFAULT_EXECUTION_METHOD,
-    creditType: RECEIPT_DEFAULT_CREDIT_TYPE,
-    amount: "",
-    currency: RECEIPT_DEFAULT_CURRENCY,
-    approvalStatus: "התשלום בוצע בהצלחה",
-  };
+  const receipt = getReceipt(uniqueId, orderId);
 
-  const shouldAutoRefresh = !isReceiptComplete(receipt) && refreshCount < 8;
+  if (!receipt) {
+    if (refreshCount < 8) {
+      return res.type("html").send(
+        renderReceiptPendingPage({
+          orderId,
+          uniqueId,
+          refreshCount,
+        })
+      );
+    }
+    return res.type("html").send(renderReceiptNotReadyPage());
+  }
+
+  if (!isReceiptComplete(receipt)) {
+    if (refreshCount < 8) {
+      return res.type("html").send(
+        renderReceiptPendingPage({
+          orderId,
+          uniqueId,
+          refreshCount,
+        })
+      );
+    }
+    return res.type("html").send(renderReceiptNotReadyPage());
+  }
 
   return res.type("html").send(
     renderSuccessReceipt({
       receipt,
       orderId,
-      uniqueId,
-      shouldAutoRefresh,
-      refreshCount,
     })
   );
 });
