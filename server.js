@@ -1,210 +1,213 @@
-const express = require("express");
-const crypto = require("crypto");
+const express = require("express")
+const crypto = require("crypto")
 
-const app = express();
+const app = express()
 
-app.use(express.urlencoded({ extended: true }));
-app.use(express.json());
-app.use(express.static("public"));
+app.use(express.urlencoded({ extended: true }))
+app.use(express.json())
+app.use(express.static("public"))
 
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || 3000
 
-const BASE_URL = String(process.env.BASE_URL || "").trim();
-const ZC_KEY = String(process.env.ZC_KEY || "").trim();
-const ZC_TERMINAL = String(process.env.ZC_TERMINAL || "").trim();
-const ZC_PASSWORD = String(process.env.ZC_PASSWORD || "").trim();
+const BASE_URL = String(process.env.BASE_URL || "").trim()
+const ZC_KEY = String(process.env.ZC_KEY || "").trim()
+const ZC_TERMINAL = String(process.env.ZC_TERMINAL || "").trim()
+const ZC_PASSWORD = String(process.env.ZC_PASSWORD || "").trim()
 
-const paymentReceiptsByUniqueId = new Map();
-const paymentReceiptsByOrderId = new Map();
+const receiptsByUniqueId = new Map()
+const receiptsByOrderId = new Map()
 
-function cleanOrderId(v) {
-  return String(v || "").replace(/\D/g, "");
+function cleanOrderId(v){
+return String(v||"").replace(/\D/g,"")
 }
 
-function toAmountNumber(v) {
-  const n = Number(v);
-  return Number.isFinite(n) ? n : NaN;
+function htmlEscape(str){
+return String(str||"")
+.replace(/&/g,"&amp;")
+.replace(/</g,"&lt;")
+.replace(/>/g,"&gt;")
+.replace(/"/g,"&quot;")
 }
 
-function htmlEscape(str) {
-  return String(str || "")
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;");
+function randomId(){
+return crypto.randomBytes(16).toString("hex")
 }
 
-function randomId() {
-  return crypto.randomBytes(16).toString("hex");
+function normalizePhoneDigits(phoneRaw){
+let d=String(phoneRaw||"").replace(/[^\d]/g,"")
+if(d.startsWith("00972")) d=d.slice(2)
+if(d.startsWith("0")&&d.length===10) d="972"+d.slice(1)
+return d.slice(0,12)
 }
 
-function normalizePhoneDigits(phoneRaw) {
-  let d = String(phoneRaw || "").replace(/[^\d]/g, "");
-  if (!d) return "";
-  if (d.startsWith("00972")) d = d.slice(2);
-  if (d.startsWith("0") && d.length === 10) d = "972" + d.slice(1);
-  return d.slice(0, 12);
+function normalizePhoneLocal(phoneRaw){
+let d=String(phoneRaw||"").replace(/[^\d]/g,"")
+if(d.startsWith("972")) return "0"+d.slice(3,12)
+return d.slice(0,10)
 }
 
-function normalizePhoneLocal(phoneRaw) {
-  let d = String(phoneRaw || "").replace(/[^\d]/g, "");
-  if (d.startsWith("972")) return "0" + d.slice(3, 12);
-  return d.slice(0, 10);
+function saveReceipt(uniqueId,orderId,receipt){
+
+const rec={
+...receipt,
+uniqueId,
+orderId,
+createdAt:Date.now()
 }
 
-function saveReceipt(uniqueId, orderId, receipt) {
-  const rec = {
-    ...receipt,
-    uniqueId,
-    orderId,
-    createdAt: Date.now(),
-  };
+receiptsByUniqueId.set(uniqueId,rec)
+receiptsByOrderId.set(orderId,rec)
 
-  paymentReceiptsByUniqueId.set(uniqueId, rec);
-  paymentReceiptsByOrderId.set(orderId, rec);
 }
 
-function getReceipt(uniqueId, orderId) {
-  if (uniqueId && paymentReceiptsByUniqueId.has(uniqueId)) {
-    return paymentReceiptsByUniqueId.get(uniqueId);
-  }
-  if (orderId && paymentReceiptsByOrderId.has(orderId)) {
-    return paymentReceiptsByOrderId.get(orderId);
-  }
-  return null;
+function getReceipt(uniqueId,orderId){
+
+if(uniqueId&&receiptsByUniqueId.has(uniqueId))
+return receiptsByUniqueId.get(uniqueId)
+
+if(orderId&&receiptsByOrderId.has(orderId))
+return receiptsByOrderId.get(orderId)
+
+return null
+
 }
 
-function deepGetFirst(source, keys) {
-  if (!source || typeof source !== "object") return "";
+function deepGetFirst(source,keys){
 
-  const wanted = keys.map((k) => String(k).toLowerCase());
-  const queue = [source];
+if(!source||typeof source!=="object") return ""
 
-  while (queue.length) {
-    const obj = queue.shift();
+const wanted=keys.map(k=>String(k).toLowerCase())
+const queue=[source]
 
-    if (!obj || typeof obj !== "object") continue;
+while(queue.length){
 
-    for (const [k, v] of Object.entries(obj)) {
-      if (wanted.includes(String(k).toLowerCase()) && v) {
-        return String(v);
-      }
-    }
+const obj=queue.shift()
 
-    for (const v of Object.values(obj)) {
-      if (v && typeof v === "object") queue.push(v);
-    }
-  }
+if(!obj||typeof obj!=="object") continue
 
-  return "";
+for(const [k,v] of Object.entries(obj)){
+if(wanted.includes(String(k).toLowerCase())&&v){
+return String(v)
+}
 }
 
-function formatIsraelDateTime(value) {
-  const raw = String(value || "").trim();
-  if (!raw) return "-";
-
-  const d = new Date(raw);
-
-  if (Number.isNaN(d.getTime())) return raw;
-
-  return new Intl.DateTimeFormat("he-IL", {
-    timeZone: "Asia/Jerusalem",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-    hour12: false,
-  }).format(d);
+for(const v of Object.values(obj)){
+if(v&&typeof v==="object") queue.push(v)
 }
 
-async function createZCreditSession({ orderId, amount, name, phone }) {
-
-  const phone972 = normalizePhoneDigits(phone);
-  const phoneLocal = normalizePhoneLocal(phone);
-
-  const uniqueId = "order-" + orderId + "-" + Date.now() + "-" + randomId();
-
-  saveReceipt(uniqueId, orderId, {
-    customerName: name,
-    phone: phoneLocal,
-    orderId,
-    uniqueId,
-    amount,
-  });
-
-  const payload = {
-
-    Key: ZC_KEY,
-
-    ...(ZC_TERMINAL ? { TerminalNumber: ZC_TERMINAL } : {}),
-    ...(ZC_PASSWORD ? { Password: ZC_PASSWORD } : {}),
-
-    UniqueID: uniqueId,
-
-    CallBackUrl: BASE_URL + "/zc-callback",
-
-    SuccessUrl:
-      BASE_URL +
-      "/payment-success?orderId=" +
-      orderId +
-      "&uniqueId=" +
-      uniqueId,
-
-    CancelUrl:
-      BASE_URL +
-      "/payment-cancel?orderId=" +
-      orderId,
-
-    Currency: "ILS",
-    Total: amount,
-    AdjustAmount: true,
-    ShowCart: false,
-
-    AdditionalText: orderId,
-
-    Customer: {
-      Name: name,
-      PhoneNumber: phone972,
-    },
-
-    CartItems: [
-      {
-        Description: "תשלום להזמנה " + orderId,
-        Quantity: 1,
-        UnitPrice: amount,
-        Amount: amount,
-        Currency: "ILS",
-      },
-    ],
-  };
-
-  const response = await fetch(
-    "https://pci.zcredit.co.il/webcheckout/api/WebCheckout/CreateSession",
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-    }
-  );
-
-  const data = await response.json();
-
-  if (data?.Data?.SessionUrl) {
-    return data.Data.SessionUrl;
-  }
-
-  throw new Error(JSON.stringify(data));
 }
 
-function renderPaymentPage({ orderId, amount }) {
-  return `
+return ""
+
+}
+
+function formatIsraelDateTime(value){
+
+const raw=String(value||"").trim()
+if(!raw) return "-"
+
+const d=new Date(raw)
+if(Number.isNaN(d.getTime())) return raw
+
+return new Intl.DateTimeFormat("he-IL",{
+timeZone:"Asia/Jerusalem",
+year:"numeric",
+month:"2-digit",
+day:"2-digit",
+hour:"2-digit",
+minute:"2-digit",
+second:"2-digit",
+hour12:false
+}).format(d)
+
+}
+
+async function createZCreditSession({orderId,amount,name,phone}){
+
+const phone972=normalizePhoneDigits(phone)
+const phoneLocal=normalizePhoneLocal(phone)
+
+const uniqueId="order-"+orderId+"-"+Date.now()+"-"+randomId()
+
+saveReceipt(uniqueId,orderId,{
+customerName:name,
+phone:phoneLocal,
+orderId,
+uniqueId,
+amount
+})
+
+const payload={
+
+Key:ZC_KEY,
+
+...(ZC_TERMINAL?{TerminalNumber:ZC_TERMINAL}:{ }),
+...(ZC_PASSWORD?{Password:ZC_PASSWORD}:{ }),
+
+UniqueID:uniqueId,
+
+CallBackUrl:BASE_URL+"/zc-callback",
+
+SuccessUrl:
+BASE_URL+
+"/payment-success?orderId="+orderId+
+"&uniqueId="+uniqueId,
+
+CancelUrl:
+BASE_URL+
+"/payment-cancel?orderId="+orderId,
+
+Currency:"ILS",
+Total:amount,
+AdjustAmount:true,
+ShowCart:false,
+
+AdditionalText:orderId,
+
+Customer:{
+Name:name,
+PhoneNumber:phone972
+},
+
+CartItems:[
+{
+Description:"תשלום להזמנה "+orderId,
+Quantity:1,
+UnitPrice:amount,
+Amount:amount,
+Currency:"ILS"
+}
+]
+
+}
+
+const response=await fetch(
+"https://pci.zcredit.co.il/webcheckout/api/WebCheckout/CreateSession",
+{
+method:"POST",
+headers:{ "Content-Type":"application/json"},
+body:JSON.stringify(payload)
+}
+)
+
+const data=await response.json()
+
+if(data?.Data?.SessionUrl){
+return data.Data.SessionUrl
+}
+
+throw new Error(JSON.stringify(data))
+
+}
+
+function renderPaymentPage({orderId,amount}){
+
+return `
 <!doctype html>
 <html lang="he" dir="rtl">
 <head>
-<meta charset="utf-8" />
-<meta name="viewport" content="width=device-width,initial-scale=1" />
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
 <title>תשלום</title>
 
 <style>
@@ -294,19 +297,20 @@ display:block;
 
 </body>
 </html>
-`;
+`
+
 }
 
-function renderSuccess({ receipt }) {
+function renderSuccess({receipt}){
 
-const approval =
-String(receipt.approvalNumber || receipt.issuerApprovalNumber || "").trim();
+const approval=
+String(receipt.approvalNumber||receipt.issuerApprovalNumber||"").trim()
 
-const merchant =
-String(receipt.merchantNumber || "").trim() || "-";
+const merchant=
+String(receipt.merchantNumber||"").trim()||"-"
 
-const card =
-String(receipt.cardNumberLast4 || "").trim() || "-";
+const card=
+String(receipt.cardNumberLast4||"").trim()||"-"
 
 return `
 <!doctype html>
@@ -403,17 +407,17 @@ direction:rtl;
 
 <div class="row">
 <div class="label">שם המשלם</div>
-<div class="value rtl">${htmlEscape(receipt.customerName || "-")}</div>
+<div class="value rtl">${htmlEscape(receipt.customerName||"-")}</div>
 </div>
 
 <div class="row">
 <div class="label">מספר הזמנה</div>
-<div class="value">${htmlEscape(receipt.orderId || "-")}</div>
+<div class="value">${htmlEscape(receipt.orderId||"-")}</div>
 </div>
 
 <div class="row">
 <div class="label">טלפון</div>
-<div class="value">${htmlEscape(receipt.phone || "-")}</div>
+<div class="value">${htmlEscape(receipt.phone||"-")}</div>
 </div>
 
 <div class="row">
@@ -433,7 +437,7 @@ direction:rtl;
 
 <div class="row">
 <div class="label">מספר אישור</div>
-<div class="value">${htmlEscape(approval || "-")}</div>
+<div class="value">${htmlEscape(approval||"-")}</div>
 </div>
 
 </div>
@@ -442,24 +446,40 @@ direction:rtl;
 
 </body>
 </html>
-`;
+`
+
 }
 
-function handleZcCallback(req, res) {
+function handleZcCallback(req,res){
 
 try{
 
 const body=req.body||{}
 
-const uniqueId=deepGetFirst(body,["UniqueID","UniqueId"])
+console.log("ZC CALLBACK")
+console.log(JSON.stringify(body,null,2))
 
-const orderId=cleanOrderId(deepGetFirst(body,["AdditionalText","orderId"]))
+const uniqueId=
+deepGetFirst(body,["UniqueID","UniqueId","Uid","uid"])
+
+const orderId=
+cleanOrderId(
+deepGetFirst(body,["AdditionalText","orderId","OrderId"])
+)
 
 const existing=getReceipt(uniqueId,orderId)||{}
 
-const cardRaw=deepGetFirst(body,["CardNumber","cardNumber","CardMask","pan"])
+const cardRaw=
+deepGetFirst(body,[
+"CardNumber",
+"cardNumber",
+"CardMask",
+"pan",
+"Pan"
+])
 
-const cardLast4=String(cardRaw).replace(/[^\\d]/g,"").slice(-4)
+const cardLast4=
+String(cardRaw).replace(/\D/g,"").slice(-4)
 
 const receipt={
 
@@ -469,15 +489,40 @@ uniqueId:uniqueId||existing.uniqueId,
 
 orderId:orderId||existing.orderId,
 
-merchantNumber:deepGetFirst(body,["MerchantNumber","merchantNumber","BusinessNumber"])||existing.merchantNumber,
+merchantNumber:
+deepGetFirst(body,[
+"MerchantNumber",
+"merchantNumber",
+"MerchantId",
+"BusinessNumber",
+"TerminalNumber"
+])||existing.merchantNumber,
 
-transactionDateTime:deepGetFirst(body,["TransactionDateTime","transactionDateTime","Date"])||existing.transactionDateTime,
+transactionDateTime:
+deepGetFirst(body,[
+"TransactionDateTime",
+"transactionDate",
+"Date",
+"date",
+"TransactionTime"
+])||existing.transactionDateTime,
 
-cardNumberLast4:cardLast4||existing.cardNumberLast4,
+cardNumberLast4:
+cardLast4||existing.cardNumberLast4,
 
-approvalNumber:deepGetFirst(body,["ApprovalNumber","approvalNumber"])||existing.approvalNumber,
+approvalNumber:
+deepGetFirst(body,[
+"ApprovalNumber",
+"approvalNumber",
+"IssuerApprovalNumber"
+])||existing.approvalNumber,
 
-issuerApprovalNumber:deepGetFirst(body,["IssuerApprovalNumber","issuerApprovalNumber"])||existing.issuerApprovalNumber,
+issuerApprovalNumber:
+deepGetFirst(body,[
+"IssuerApprovalNumber",
+"issuerApprovalNumber",
+"ApprovalNumber"
+])||existing.issuerApprovalNumber
 
 }
 
@@ -494,16 +539,13 @@ res.send("OK")
 }
 
 app.get("/",(req,res)=>{
-
 res.send("Hataboon Payment Server Running 🍕")
-
 })
 
 app.get("/pay/:orderId/:amount",(req,res)=>{
 
 const orderId=cleanOrderId(req.params.orderId)
-
-const amount=toAmountNumber(req.params.amount)
+const amount=Number(req.params.amount)
 
 res.send(renderPaymentPage({orderId,amount}))
 
@@ -531,7 +573,6 @@ res.redirect(sessionUrl)
 }catch(err){
 
 console.error(err)
-
 res.send("שגיאה ביצירת תשלום")
 
 }
@@ -543,15 +584,12 @@ app.all("/zc-callback",handleZcCallback)
 app.get("/payment-success",(req,res)=>{
 
 const orderId=cleanOrderId(req.query.orderId)
-
 const uniqueId=req.query.uniqueId
 
 const receipt=getReceipt(uniqueId,orderId)||{
-
 orderId,
 customerName:"",
 phone:""
-
 }
 
 res.send(renderSuccess({receipt}))
@@ -559,13 +597,9 @@ res.send(renderSuccess({receipt}))
 })
 
 app.get("/payment-cancel",(req,res)=>{
-
 res.send("התשלום בוטל")
-
 })
 
 app.listen(PORT,()=>{
-
 console.log("Server running on port",PORT)
-
 })
