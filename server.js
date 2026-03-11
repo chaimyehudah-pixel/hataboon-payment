@@ -9,10 +9,12 @@ app.use(express.static("public"))
 
 const PORT = process.env.PORT || 3000
 
-const BASE_URL = String(process.env.BASE_URL || "").trim()
-const ZC_KEY = String(process.env.ZC_KEY || "").trim()
-const ZC_TERMINAL = String(process.env.ZC_TERMINAL || "").trim()
-const ZC_PASSWORD = String(process.env.ZC_PASSWORD || "").trim()
+const BASE_URL = process.env.BASE_URL
+const ZC_KEY = process.env.ZC_KEY
+const ZC_TERMINAL = process.env.ZC_TERMINAL
+const ZC_PASSWORD = process.env.ZC_PASSWORD
+
+const MERCHANT_NUMBER = "5927439"
 
 const receiptsByUniqueId = new Map()
 const receiptsByOrderId = new Map()
@@ -33,17 +35,19 @@ function randomId(){
 return crypto.randomBytes(16).toString("hex")
 }
 
-function normalizePhoneDigits(phoneRaw){
-let d=String(phoneRaw||"").replace(/[^\d]/g,"")
-if(d.startsWith("00972")) d=d.slice(2)
-if(d.startsWith("0")&&d.length===10) d="972"+d.slice(1)
-return d.slice(0,12)
-}
+function formatIsraelDateTime(date){
 
-function normalizePhoneLocal(phoneRaw){
-let d=String(phoneRaw||"").replace(/[^\d]/g,"")
-if(d.startsWith("972")) return "0"+d.slice(3,12)
-return d.slice(0,10)
+return new Intl.DateTimeFormat("he-IL",{
+timeZone:"Asia/Jerusalem",
+year:"numeric",
+month:"2-digit",
+day:"2-digit",
+hour:"2-digit",
+minute:"2-digit",
+second:"2-digit",
+hour12:false
+}).format(date)
+
 }
 
 function saveReceipt(uniqueId,orderId,receipt){
@@ -51,8 +55,7 @@ function saveReceipt(uniqueId,orderId,receipt){
 const rec={
 ...receipt,
 uniqueId,
-orderId,
-createdAt:Date.now()
+orderId
 }
 
 receiptsByUniqueId.set(uniqueId,rec)
@@ -72,77 +75,22 @@ return null
 
 }
 
-function deepGetFirst(source,keys){
-
-if(!source||typeof source!=="object") return ""
-
-const wanted=keys.map(k=>String(k).toLowerCase())
-const queue=[source]
-
-while(queue.length){
-
-const obj=queue.shift()
-
-if(!obj||typeof obj!=="object") continue
-
-for(const [k,v] of Object.entries(obj)){
-if(wanted.includes(String(k).toLowerCase())&&v){
-return String(v)
-}
-}
-
-for(const v of Object.values(obj)){
-if(v&&typeof v==="object") queue.push(v)
-}
-
-}
-
-return ""
-
-}
-
-function formatIsraelDateTime(value){
-
-const raw=String(value||"").trim()
-if(!raw) return "-"
-
-const d=new Date(raw)
-if(Number.isNaN(d.getTime())) return raw
-
-return new Intl.DateTimeFormat("he-IL",{
-timeZone:"Asia/Jerusalem",
-year:"numeric",
-month:"2-digit",
-day:"2-digit",
-hour:"2-digit",
-minute:"2-digit",
-second:"2-digit",
-hour12:false
-}).format(d)
-
-}
-
 async function createZCreditSession({orderId,amount,name,phone}){
-
-const phone972=normalizePhoneDigits(phone)
-const phoneLocal=normalizePhoneLocal(phone)
 
 const uniqueId="order-"+orderId+"-"+Date.now()+"-"+randomId()
 
 saveReceipt(uniqueId,orderId,{
 customerName:name,
-phone:phoneLocal,
-orderId,
-uniqueId,
-amount
+phone,
+orderId
 })
 
 const payload={
 
 Key:ZC_KEY,
 
-...(ZC_TERMINAL?{TerminalNumber:ZC_TERMINAL}:{ }),
-...(ZC_PASSWORD?{Password:ZC_PASSWORD}:{ }),
+TerminalNumber:ZC_TERMINAL,
+Password:ZC_PASSWORD,
 
 UniqueID:uniqueId,
 
@@ -159,14 +107,12 @@ BASE_URL+
 
 Currency:"ILS",
 Total:amount,
-AdjustAmount:true,
-ShowCart:false,
 
 AdditionalText:orderId,
 
 Customer:{
 Name:name,
-PhoneNumber:phone972
+PhoneNumber:phone
 },
 
 CartItems:[
@@ -192,9 +138,8 @@ body:JSON.stringify(payload)
 
 const data=await response.json()
 
-if(data?.Data?.SessionUrl){
+if(data?.Data?.SessionUrl)
 return data.Data.SessionUrl
-}
 
 throw new Error(JSON.stringify(data))
 
@@ -203,13 +148,9 @@ throw new Error(JSON.stringify(data))
 function renderPaymentPage({orderId,amount}){
 
 return `
-<!doctype html>
-<html lang="he" dir="rtl">
+<html dir="rtl">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>תשלום</title>
-
 <style>
 
 body{
@@ -303,32 +244,16 @@ display:block;
 
 function renderSuccess({receipt}){
 
-const approval=
-String(receipt.approvalNumber||receipt.issuerApprovalNumber||"").trim()
-
-const merchant=
-String(receipt.merchantNumber||"").trim()||"-"
-
-const card=
-String(receipt.cardNumberLast4||"").trim()||"-"
-
 return `
-<!doctype html>
-<html lang="he" dir="rtl">
+<html dir="rtl">
 <head>
-
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-
-<title>אישור תשלום</title>
-
 <style>
 
 body{
 font-family:Arial;
 background:#f4f4f4;
 padding:20px;
-margin:0;
 }
 
 .card{
@@ -343,48 +268,17 @@ text-align:center;
 
 .logo img{
 max-width:220px;
-height:auto;
-}
-
-.title{
-font-size:32px;
-font-weight:900;
-margin:10px 0 8px;
-}
-
-.ok{
-font-size:22px;
-color:#1a7f37;
-margin-bottom:22px;
-font-weight:800;
-}
-
-.rows{
-margin-top:18px;
-text-align:right;
 }
 
 .row{
 display:flex;
 justify-content:space-between;
-gap:12px;
 border-bottom:1px solid #eee;
-padding:12px 0;
+padding:10px 0;
 }
 
 .label{
-font-weight:800;
-color:#333;
-}
-
-.value{
-color:#111;
-text-align:left;
-direction:ltr;
-}
-
-.value.rtl{
-direction:rtl;
+font-weight:bold;
 }
 
 </style>
@@ -399,47 +293,45 @@ direction:rtl;
 <img src="/logo.jpeg">
 </div>
 
-<div class="title">אישור תשלום</div>
+<h2>אישור תשלום</h2>
 
-<div class="ok">התשלום עבר בהצלחה ✅</div>
-
-<div class="rows">
+<div style="color:green;font-weight:bold">
+התשלום עבר בהצלחה ✅
+</div>
 
 <div class="row">
 <div class="label">שם המשלם</div>
-<div class="value rtl">${htmlEscape(receipt.customerName||"-")}</div>
+<div>${htmlEscape(receipt.customerName)}</div>
 </div>
 
 <div class="row">
 <div class="label">מספר הזמנה</div>
-<div class="value">${htmlEscape(receipt.orderId||"-")}</div>
+<div>${receipt.orderId}</div>
 </div>
 
 <div class="row">
 <div class="label">טלפון</div>
-<div class="value">${htmlEscape(receipt.phone||"-")}</div>
+<div>${receipt.phone}</div>
 </div>
 
 <div class="row">
 <div class="label">מספר עסק בחברת האשראי</div>
-<div class="value">${htmlEscape(merchant)}</div>
+<div>${MERCHANT_NUMBER}</div>
 </div>
 
 <div class="row">
 <div class="label">תאריך ושעת העסקה</div>
-<div class="value">${htmlEscape(formatIsraelDateTime(receipt.transactionDateTime))}</div>
+<div>${formatIsraelDateTime(new Date())}</div>
 </div>
 
 <div class="row">
 <div class="label">מספר כרטיס</div>
-<div class="value">${htmlEscape(card)}</div>
+<div>${receipt.cardLast4||"-"}</div>
 </div>
 
 <div class="row">
 <div class="label">מספר אישור</div>
-<div class="value">${htmlEscape(approval||"-")}</div>
-</div>
-
+<div>${receipt.approval||"-"}</div>
 </div>
 
 </div>
@@ -456,77 +348,27 @@ try{
 
 const body=req.body||{}
 
-console.log("ZC CALLBACK")
-console.log(JSON.stringify(body,null,2))
-
-const uniqueId=
-deepGetFirst(body,["UniqueID","UniqueId","Uid","uid"])
-
-const orderId=
-cleanOrderId(
-deepGetFirst(body,["AdditionalText","orderId","OrderId"])
-)
+const uniqueId=body.UniqueID
+const orderId=cleanOrderId(body.AdditionalText)
 
 const existing=getReceipt(uniqueId,orderId)||{}
-
-const cardRaw=
-deepGetFirst(body,[
-"CardNumber",
-"cardNumber",
-"CardMask",
-"pan",
-"Pan"
-])
-
-const cardLast4=
-String(cardRaw).replace(/\D/g,"").slice(-4)
 
 const receipt={
 
 ...existing,
 
-uniqueId:uniqueId||existing.uniqueId,
+approval:body.ApprovalNumber,
 
-orderId:orderId||existing.orderId,
+cardLast4:
+body.CardNumber?
+body.CardNumber.slice(-4):
+"",
 
-merchantNumber:
-deepGetFirst(body,[
-"MerchantNumber",
-"merchantNumber",
-"MerchantId",
-"BusinessNumber",
-"TerminalNumber"
-])||existing.merchantNumber,
-
-transactionDateTime:
-deepGetFirst(body,[
-"TransactionDateTime",
-"transactionDate",
-"Date",
-"date",
-"TransactionTime"
-])||existing.transactionDateTime,
-
-cardNumberLast4:
-cardLast4||existing.cardNumberLast4,
-
-approvalNumber:
-deepGetFirst(body,[
-"ApprovalNumber",
-"approvalNumber",
-"IssuerApprovalNumber"
-])||existing.approvalNumber,
-
-issuerApprovalNumber:
-deepGetFirst(body,[
-"IssuerApprovalNumber",
-"issuerApprovalNumber",
-"ApprovalNumber"
-])||existing.issuerApprovalNumber
+transactionDateTime:new Date()
 
 }
 
-saveReceipt(receipt.uniqueId,receipt.orderId,receipt)
+saveReceipt(uniqueId,orderId,receipt)
 
 }catch(err){
 
@@ -545,7 +387,7 @@ res.send("Hataboon Payment Server Running 🍕")
 app.get("/pay/:orderId/:amount",(req,res)=>{
 
 const orderId=cleanOrderId(req.params.orderId)
-const amount=Number(req.params.amount)
+const amount=req.params.amount
 
 res.send(renderPaymentPage({orderId,amount}))
 
@@ -557,11 +399,9 @@ try{
 
 const {orderId,amount,name,phone}=req.body
 
-const cleanId=cleanOrderId(orderId)
-
 const sessionUrl=await createZCreditSession({
 
-orderId:cleanId,
+orderId:cleanOrderId(orderId),
 amount:Number(amount),
 name,
 phone
