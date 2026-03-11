@@ -19,6 +19,7 @@ const OTP_SIGNING_SECRET = String(process.env.OTP_SIGNING_SECRET || "").trim();
 
 const FLOW_TTL_MINUTES = 60;
 const RECEIPT_CACHE_TTL_MS = 2 * 24 * 60 * 60 * 1000;
+const SUCCESS_POLL_SECONDS = 60;
 
 const RECEIPT_TERMINAL_NAME = process.env.RECEIPT_TERMINAL_NAME || "הטאבון";
 const RECEIPT_TERMINAL_NUMBER = process.env.RECEIPT_TERMINAL_NUMBER || "2666131";
@@ -81,17 +82,17 @@ function normalizePhoneLocal(phoneRaw) {
   return d;
 }
 
-function hmacSign(payloadObj) {
+function signToken(payloadObj, secret) {
   const payloadJson = JSON.stringify(payloadObj);
   const payloadB64 = Buffer.from(payloadJson, "utf8").toString("base64url");
   const sig = crypto
-    .createHmac("sha256", OTP_SIGNING_SECRET)
+    .createHmac("sha256", secret)
     .update(payloadB64)
     .digest("base64url");
   return `${payloadB64}.${sig}`;
 }
 
-function hmacVerify(token) {
+function verifyToken(token, secret) {
   if (!token || typeof token !== "string") return null;
   const parts = token.split(".");
   if (parts.length !== 2) return null;
@@ -99,7 +100,7 @@ function hmacVerify(token) {
   const [payloadB64, sig] = parts;
 
   const expected = crypto
-    .createHmac("sha256", OTP_SIGNING_SECRET)
+    .createHmac("sha256", secret)
     .update(payloadB64)
     .digest("base64url");
 
@@ -115,6 +116,22 @@ function hmacVerify(token) {
   } catch {
     return null;
   }
+}
+
+function hmacSign(payloadObj) {
+  return signToken(payloadObj, OTP_SIGNING_SECRET);
+}
+
+function hmacVerify(token) {
+  return verifyToken(token, OTP_SIGNING_SECRET);
+}
+
+function stateSign(payloadObj) {
+  return signToken(payloadObj, OTP_SIGNING_SECRET);
+}
+
+function stateVerify(token) {
+  return verifyToken(token, OTP_SIGNING_SECRET);
 }
 
 function cleanupOldFlows() {
@@ -283,7 +300,7 @@ function normalizeReceiptData(rawBody, fallback = {}) {
       fallback.orderId ||
       "",
     uniqueId:
-      deepGetFirst(body, ["UniqueID", "UniqueId"]) ||
+      deepGetFirst(body, ["UniqueID", "UniqueId", "Uid", "uid"]) ||
       fallback.uniqueId ||
       "",
     terminalName:
@@ -387,6 +404,38 @@ function isReceiptComplete(receipt) {
   );
 }
 
+function mergeReceipt(base = {}, incoming = {}) {
+  const out = { ...base };
+  for (const [k, v] of Object.entries(incoming || {})) {
+    if (v !== undefined && v !== null && String(v).trim() !== "") {
+      out[k] = v;
+    }
+  }
+  return out;
+}
+
+function fallbackReceiptFromState(state) {
+  if (!state) return null;
+  return {
+    customerName: state.name || "",
+    phone: state.phoneLocal || "",
+    orderId: state.orderId || "",
+    uniqueId: state.uniqueId || "",
+    amount: formatAmountValue(state.amount || ""),
+    currency: RECEIPT_DEFAULT_CURRENCY,
+    terminalName: RECEIPT_TERMINAL_NAME,
+    terminalNumber: RECEIPT_TERMINAL_NUMBER,
+    softwareVersion: RECEIPT_SOFTWARE_VERSION,
+    merchantNumber: RECEIPT_MERCHANT_NUMBER,
+    executionMethod: RECEIPT_DEFAULT_EXECUTION_METHOD,
+    approver: RECEIPT_DEFAULT_APPROVER,
+    transactionType: RECEIPT_DEFAULT_TRANSACTION_TYPE,
+    creditType: RECEIPT_DEFAULT_CREDIT_TYPE,
+    approvalStatus: "התשלום בוצע בהצלחה",
+    createdAt: Date.now(),
+  };
+}
+
 async function requestOtp(phone, orderId, mode = "auto") {
   const response = await fetch(otpBaseUrl() + "/otp/request", {
     method: "POST",
@@ -445,6 +494,15 @@ async function createZCreditSession({ orderId, amount, name, phone972, phoneLoca
 
   const uniqueId = "order-" + cleanId + "-" + Date.now();
 
+  const stateToken = stateSign({
+    uniqueId,
+    orderId: cleanId,
+    name: customerName,
+    phoneLocal: phoneLocal || normalizePhoneLocal(phone972),
+    amount: total.toFixed(2),
+    exp: Date.now() + 24 * 60 * 60 * 1000,
+  });
+
   saveReceipt(uniqueId, cleanId, {
     customerName,
     phone: phoneLocal || normalizePhoneLocal(phone972),
@@ -452,7 +510,7 @@ async function createZCreditSession({ orderId, amount, name, phone972, phoneLoca
     uniqueId,
     amount: total.toFixed(2),
     currency: RECEIPT_DEFAULT_CURRENCY,
-    approvalStatus: "ממתין לאישור סופי",
+    approvalStatus: "התשלום בוצע בהצלחה",
     terminalName: RECEIPT_TERMINAL_NAME,
     terminalNumber: RECEIPT_TERMINAL_NUMBER,
     softwareVersion: RECEIPT_SOFTWARE_VERSION,
@@ -472,8 +530,20 @@ async function createZCreditSession({ orderId, amount, name, phone972, phoneLoca
 
     UniqueID: uniqueId,
     CallBackUrl: BASE_URL + "/zc-callback",
-    SuccessUrl: BASE_URL + "/payment-success?orderId=" + encodeURIComponent(cleanId) + "&uniqueId=" + encodeURIComponent(uniqueId),
-    CancelUrl: BASE_URL + "/payment-cancel?orderId=" + encodeURIComponent(cleanId) + "&uniqueId=" + encodeURIComponent(uniqueId),
+    SuccessUrl:
+      BASE_URL +
+      "/payment-success?orderId=" +
+      encodeURIComponent(cleanId) +
+      "&uniqueId=" +
+      encodeURIComponent(uniqueId) +
+      "&state=" +
+      encodeURIComponent(stateToken),
+    CancelUrl:
+      BASE_URL +
+      "/payment-cancel?orderId=" +
+      encodeURIComponent(cleanId) +
+      "&uniqueId=" +
+      encodeURIComponent(uniqueId),
 
     Currency: "ILS",
     Total: total,
@@ -834,7 +904,7 @@ function renderOtpPage({ flow, flowId, error = "" }) {
 `;
 }
 
-function renderReceiptPendingPage({ orderId, uniqueId, refreshCount = 0 }) {
+function renderReceiptPendingPage({ orderId, uniqueId, stateToken = "", refreshCount = 0 }) {
   return `
 <!doctype html>
 <html lang="he" dir="rtl">
@@ -842,7 +912,7 @@ function renderReceiptPendingPage({ orderId, uniqueId, refreshCount = 0 }) {
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1" />
 <title>מעבד אישור תשלום</title>
-<meta http-equiv="refresh" content="1.2;url=/payment-success?orderId=${encodeURIComponent(orderId || "")}&uniqueId=${encodeURIComponent(uniqueId || "")}&r=${Number(refreshCount || 0) + 1}">
+<meta http-equiv="refresh" content="1.2;url=/payment-success?orderId=${encodeURIComponent(orderId || "")}&uniqueId=${encodeURIComponent(uniqueId || "")}&state=${encodeURIComponent(stateToken || "")}&r=${Number(refreshCount || 0) + 1}">
 
 <style>
   body{
@@ -1134,7 +1204,7 @@ function renderReceiptNotReadyPage() {
   <div class="card">
     <div class="logo"><img src="/logo.jpeg" alt="הטאבון"></div>
     <h1>אישור התשלום עדיין לא זמין</h1>
-    <p>אנא רענן את הדף בעוד מספר שניות.</p>
+    <p>העסקה בוצעה, אך נתוני האישור המלאים עדיין לא התקבלו מחברת האשראי.<br>אנא רענן את הדף בעוד מספר שניות.</p>
   </div>
 </body>
 </html>
@@ -1179,6 +1249,58 @@ function renderCancelPage(orderId) {
 </body>
 </html>
 `;
+}
+
+function handleZcCallback(req, res) {
+  try {
+    const body = req.body || {};
+
+    const uniqueId =
+      deepGetFirst(body, ["UniqueID", "UniqueId", "Uid", "uid"]) || "";
+
+    const orderId =
+      cleanOrderId(
+        deepGetFirst(body, ["AdditionalText", "additionalText", "OrderId", "orderId"])
+      ) || "";
+
+    const existing = getReceipt(uniqueId, orderId) || {};
+
+    const receipt = normalizeReceiptData(body, {
+      customerName: existing.customerName || "",
+      phone: existing.phone || "",
+      orderId: orderId || existing.orderId || "",
+      uniqueId: uniqueId || existing.uniqueId || "",
+      amount: existing.amount || "",
+      terminalName: existing.terminalName || RECEIPT_TERMINAL_NAME,
+      terminalNumber: existing.terminalNumber || RECEIPT_TERMINAL_NUMBER,
+      softwareVersion: existing.softwareVersion || RECEIPT_SOFTWARE_VERSION,
+      merchantNumber: existing.merchantNumber || RECEIPT_MERCHANT_NUMBER,
+      executionMethod: existing.executionMethod || RECEIPT_DEFAULT_EXECUTION_METHOD,
+      approver: existing.approver || RECEIPT_DEFAULT_APPROVER,
+      transactionType: existing.transactionType || RECEIPT_DEFAULT_TRANSACTION_TYPE,
+      creditType: existing.creditType || RECEIPT_DEFAULT_CREDIT_TYPE,
+      currency: existing.currency || RECEIPT_DEFAULT_CURRENCY,
+    });
+
+    saveReceipt(uniqueId || existing.uniqueId || "", orderId || existing.orderId || "", {
+      ...existing,
+      ...receipt,
+      rawBody: body,
+      createdAt: existing.createdAt || Date.now(),
+    });
+
+    console.log("========== ZC CALLBACK ==========");
+    console.log("Time:", new Date().toISOString());
+    console.log("Path:", req.path);
+    console.log("UniqueID:", uniqueId);
+    console.log("OrderId:", orderId);
+    console.log("Body:", body);
+    console.log("================================");
+  } catch (err) {
+    console.error("zc-callback error:", err);
+  }
+
+  res.status(200).send("OK");
 }
 
 // ===== HOME =====
@@ -1387,94 +1509,50 @@ app.post("/create-session", async (req, res) => {
   }
 });
 
-// ===== ZC CALLBACK =====
-app.all("/zc-callback", (req, res) => {
-  try {
-    const body = req.body || {};
-
-    const uniqueId =
-      deepGetFirst(body, ["UniqueID", "UniqueId"]) || "";
-
-    const orderId =
-      cleanOrderId(
-        deepGetFirst(body, ["AdditionalText", "additionalText", "OrderId", "orderId"])
-      ) || "";
-
-    const existing = getReceipt(uniqueId, orderId) || {};
-
-    const receipt = normalizeReceiptData(body, {
-      customerName: existing.customerName || "",
-      phone: existing.phone || "",
-      orderId: orderId || existing.orderId || "",
-      uniqueId: uniqueId || existing.uniqueId || "",
-      amount: existing.amount || "",
-      terminalName: existing.terminalName || RECEIPT_TERMINAL_NAME,
-      terminalNumber: existing.terminalNumber || RECEIPT_TERMINAL_NUMBER,
-      softwareVersion: existing.softwareVersion || RECEIPT_SOFTWARE_VERSION,
-      merchantNumber: existing.merchantNumber || RECEIPT_MERCHANT_NUMBER,
-      executionMethod: existing.executionMethod || RECEIPT_DEFAULT_EXECUTION_METHOD,
-      approver: existing.approver || RECEIPT_DEFAULT_APPROVER,
-      transactionType: existing.transactionType || RECEIPT_DEFAULT_TRANSACTION_TYPE,
-      creditType: existing.creditType || RECEIPT_DEFAULT_CREDIT_TYPE,
-      currency: existing.currency || RECEIPT_DEFAULT_CURRENCY,
-    });
-
-    saveReceipt(uniqueId || existing.uniqueId || "", orderId || existing.orderId || "", {
-      ...existing,
-      ...receipt,
-      rawBody: body,
-      createdAt: existing.createdAt || Date.now(),
-    });
-
-    console.log("========== ZC CALLBACK ==========");
-    console.log("Time:", new Date().toISOString());
-    console.log("Body:", body);
-    console.log("================================");
-  } catch (err) {
-    console.error("zc-callback error:", err);
-  }
-
-  res.status(200).send("OK");
-});
+// ===== CALLBACKS =====
+app.all("/zc-callback", handleZcCallback);
+app.all("/callback", handleZcCallback);
 
 // ===== SUCCESS RECEIPT =====
 app.get("/payment-success", (req, res) => {
   const orderId = cleanOrderId(req.query.orderId || "");
   const uniqueId = String(req.query.uniqueId || "").trim();
   const refreshCount = Math.max(0, Number(req.query.r || 0) || 0);
+  const stateToken = String(req.query.state || "").trim();
+  const state = stateVerify(stateToken);
 
-  const receipt = getReceipt(uniqueId, orderId);
+  const savedReceipt = getReceipt(uniqueId, orderId);
+  const stateReceipt = fallbackReceiptFromState(state);
+  const receipt = mergeReceipt(stateReceipt || {}, savedReceipt || {});
 
-  if (!receipt) {
-    if (refreshCount < 8) {
+  if (!savedReceipt || !isReceiptComplete(receipt)) {
+    if (refreshCount < SUCCESS_POLL_SECONDS) {
       return res.type("html").send(
         renderReceiptPendingPage({
-          orderId,
-          uniqueId,
+          orderId: orderId || (state ? state.orderId : ""),
+          uniqueId: uniqueId || (state ? state.uniqueId : ""),
+          stateToken,
           refreshCount,
         })
       );
     }
-    return res.type("html").send(renderReceiptNotReadyPage());
-  }
 
-  if (!isReceiptComplete(receipt)) {
-    if (refreshCount < 8) {
+    if (receipt && (receipt.customerName || receipt.orderId || receipt.amount)) {
       return res.type("html").send(
-        renderReceiptPendingPage({
-          orderId,
-          uniqueId,
-          refreshCount,
+        renderSuccessReceipt({
+          receipt,
+          orderId: orderId || receipt.orderId || "",
         })
       );
     }
+
     return res.type("html").send(renderReceiptNotReadyPage());
   }
 
   return res.type("html").send(
     renderSuccessReceipt({
       receipt,
-      orderId,
+      orderId: orderId || receipt.orderId || "",
     })
   );
 });
