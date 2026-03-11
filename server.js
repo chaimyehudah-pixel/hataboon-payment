@@ -14,8 +14,6 @@ const ZC_KEY = String(process.env.ZC_KEY || "").trim();
 const ZC_TERMINAL = String(process.env.ZC_TERMINAL || "").trim();
 const ZC_PASSWORD = String(process.env.ZC_PASSWORD || "").trim();
 
-const RECEIPT_CACHE_TTL_MS = 2 * 24 * 60 * 60 * 1000;
-
 const paymentReceiptsByUniqueId = new Map();
 const paymentReceiptsByOrderId = new Map();
 
@@ -78,11 +76,13 @@ function getReceipt(uniqueId, orderId) {
 
 function deepGetFirst(source, keys) {
   if (!source || typeof source !== "object") return "";
+
   const wanted = keys.map((k) => String(k).toLowerCase());
   const queue = [source];
 
   while (queue.length) {
     const obj = queue.shift();
+
     if (!obj || typeof obj !== "object") continue;
 
     for (const [k, v] of Object.entries(obj)) {
@@ -299,7 +299,14 @@ display:block;
 
 function renderSuccess({ receipt }) {
 
-const approval = receipt.approvalNumber || receipt.issuerApprovalNumber || "";
+const approval =
+String(receipt.approvalNumber || receipt.issuerApprovalNumber || "").trim();
+
+const merchant =
+String(receipt.merchantNumber || "").trim() || "-";
+
+const card =
+String(receipt.cardNumberLast4 || "").trim() || "-";
 
 return `
 <!doctype html>
@@ -317,11 +324,12 @@ body{
 font-family:Arial;
 background:#f4f4f4;
 padding:20px;
+margin:0;
 }
 
 .card{
-max-width:500px;
-margin:auto;
+max-width:520px;
+margin:40px auto;
 background:#fff;
 border-radius:20px;
 padding:30px;
@@ -330,31 +338,49 @@ text-align:center;
 }
 
 .logo img{
-max-width:200px;
+max-width:220px;
+height:auto;
 }
 
 .title{
 font-size:32px;
-font-weight:bold;
-margin:10px 0;
+font-weight:900;
+margin:10px 0 8px;
 }
 
 .ok{
 font-size:22px;
 color:#1a7f37;
-margin-bottom:20px;
-font-weight:bold;
+margin-bottom:22px;
+font-weight:800;
+}
+
+.rows{
+margin-top:18px;
+text-align:right;
 }
 
 .row{
 display:flex;
 justify-content:space-between;
+gap:12px;
 border-bottom:1px solid #eee;
-padding:10px 0;
+padding:12px 0;
 }
 
 .label{
-font-weight:bold;
+font-weight:800;
+color:#333;
+}
+
+.value{
+color:#111;
+text-align:left;
+direction:ltr;
+}
+
+.value.rtl{
+direction:rtl;
 }
 
 </style>
@@ -373,12 +399,44 @@ font-weight:bold;
 
 <div class="ok">התשלום עבר בהצלחה ✅</div>
 
-<div class="row"><div class="label">שם המשלם</div><div>${htmlEscape(receipt.customerName)}</div></div>
-<div class="row"><div class="label">מספר הזמנה</div><div>${htmlEscape(receipt.orderId)}</div></div>
-<div class="row"><div class="label">טלפון</div><div>${htmlEscape(receipt.phone)}</div></div>
-<div class="row"><div class="label">תאריך ושעה</div><div>${formatIsraelDateTime(receipt.transactionDateTime)}</div></div>
+<div class="rows">
 
-${approval ? `<div class="row"><div class="label">מספר אישור</div><div>${approval}</div></div>` : ""}
+<div class="row">
+<div class="label">שם המשלם</div>
+<div class="value rtl">${htmlEscape(receipt.customerName || "-")}</div>
+</div>
+
+<div class="row">
+<div class="label">מספר הזמנה</div>
+<div class="value">${htmlEscape(receipt.orderId || "-")}</div>
+</div>
+
+<div class="row">
+<div class="label">טלפון</div>
+<div class="value">${htmlEscape(receipt.phone || "-")}</div>
+</div>
+
+<div class="row">
+<div class="label">מספר עסק בחברת האשראי</div>
+<div class="value">${htmlEscape(merchant)}</div>
+</div>
+
+<div class="row">
+<div class="label">תאריך ושעת העסקה</div>
+<div class="value">${htmlEscape(formatIsraelDateTime(receipt.transactionDateTime))}</div>
+</div>
+
+<div class="row">
+<div class="label">מספר כרטיס</div>
+<div class="value">${htmlEscape(card)}</div>
+</div>
+
+<div class="row">
+<div class="label">מספר אישור</div>
+<div class="value">${htmlEscape(approval || "-")}</div>
+</div>
+
+</div>
 
 </div>
 
@@ -389,20 +447,50 @@ ${approval ? `<div class="row"><div class="label">מספר אישור</div><div>
 
 function handleZcCallback(req, res) {
 
-const body = req.body || {};
+try{
 
-const uniqueId = deepGetFirst(body, ["UniqueID","UniqueId"]);
-const orderId = cleanOrderId(deepGetFirst(body, ["AdditionalText","orderId"]));
+const body=req.body||{}
 
-const receipt = getReceipt(uniqueId,orderId) || {};
+const uniqueId=deepGetFirst(body,["UniqueID","UniqueId"])
 
-receipt.transactionDateTime = deepGetFirst(body,["TransactionDateTime","date"]);
-receipt.approvalNumber = deepGetFirst(body,["ApprovalNumber","approvalNumber"]);
-receipt.issuerApprovalNumber = deepGetFirst(body,["IssuerApprovalNumber"]);
+const orderId=cleanOrderId(deepGetFirst(body,["AdditionalText","orderId"]))
 
-saveReceipt(uniqueId,orderId,receipt);
+const existing=getReceipt(uniqueId,orderId)||{}
 
-res.send("OK");
+const cardRaw=deepGetFirst(body,["CardNumber","cardNumber","CardMask","pan"])
+
+const cardLast4=String(cardRaw).replace(/[^\\d]/g,"").slice(-4)
+
+const receipt={
+
+...existing,
+
+uniqueId:uniqueId||existing.uniqueId,
+
+orderId:orderId||existing.orderId,
+
+merchantNumber:deepGetFirst(body,["MerchantNumber","merchantNumber","BusinessNumber"])||existing.merchantNumber,
+
+transactionDateTime:deepGetFirst(body,["TransactionDateTime","transactionDateTime","Date"])||existing.transactionDateTime,
+
+cardNumberLast4:cardLast4||existing.cardNumberLast4,
+
+approvalNumber:deepGetFirst(body,["ApprovalNumber","approvalNumber"])||existing.approvalNumber,
+
+issuerApprovalNumber:deepGetFirst(body,["IssuerApprovalNumber","issuerApprovalNumber"])||existing.issuerApprovalNumber,
+
+}
+
+saveReceipt(receipt.uniqueId,receipt.orderId,receipt)
+
+}catch(err){
+
+console.error(err)
+
+}
+
+res.send("OK")
+
 }
 
 app.get("/",(req,res)=>{
@@ -414,6 +502,7 @@ res.send("Hataboon Payment Server Running 🍕")
 app.get("/pay/:orderId/:amount",(req,res)=>{
 
 const orderId=cleanOrderId(req.params.orderId)
+
 const amount=toAmountNumber(req.params.amount)
 
 res.send(renderPaymentPage({orderId,amount}))
@@ -429,10 +518,12 @@ const {orderId,amount,name,phone}=req.body
 const cleanId=cleanOrderId(orderId)
 
 const sessionUrl=await createZCreditSession({
+
 orderId:cleanId,
 amount:Number(amount),
 name,
 phone
+
 })
 
 res.redirect(sessionUrl)
@@ -452,9 +543,16 @@ app.all("/zc-callback",handleZcCallback)
 app.get("/payment-success",(req,res)=>{
 
 const orderId=cleanOrderId(req.query.orderId)
+
 const uniqueId=req.query.uniqueId
 
-const receipt=getReceipt(uniqueId,orderId)
+const receipt=getReceipt(uniqueId,orderId)||{
+
+orderId,
+customerName:"",
+phone:""
+
+}
 
 res.send(renderSuccess({receipt}))
 
