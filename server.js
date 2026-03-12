@@ -259,21 +259,23 @@ function renderSuccess({ receipt, orderIdFromUrl }) {
   const customerName = String(receipt.customerName || "").trim();
   const effectiveOrderId = cleanOrderId(receipt.orderId || orderIdFromUrl || "");
   const phone = String(receipt.phone || "").trim();
+
   const amount =
     receipt.amount !== undefined &&
     receipt.amount !== null &&
     String(receipt.amount).trim() !== ""
       ? String(receipt.amount).trim()
       : "";
+
   const approval = String(receipt.approval || "").trim();
   const transactionDateTime = String(receipt.transactionDateTimeFormatted || "").trim();
 
-  function row(label, value) {
+  function block(label, value) {
     if (!value || String(value).trim() === "") return "";
     return `
-<div class="row">
-<div class="label">${htmlEscape(label)}</div>
-<div class="value">${htmlEscape(value)}</div>
+<div class="field">
+  <div class="field-label">${htmlEscape(label)}</div>
+  <div class="field-value">${htmlEscape(value)}</div>
 </div>
 `;
   }
@@ -297,9 +299,12 @@ max-width:520px;
 margin:40px auto;
 background:#fff;
 border-radius:20px;
-padding:30px;
+padding:30px 24px;
 box-shadow:0 10px 30px rgba(0,0,0,.1);
 text-align:center;
+}
+.logo{
+margin-bottom:14px;
 }
 .logo img{
 max-width:220px;
@@ -313,32 +318,30 @@ margin:10px 0 8px;
 .ok{
 font-size:22px;
 color:#1a7f37;
-margin-bottom:22px;
+margin-bottom:24px;
 font-weight:800;
 }
-.rows{
-margin-top:18px;
-text-align:right;
+.fields{
+margin-top:10px;
 }
-.row{
-display:flex;
-justify-content:space-between;
-gap:12px;
+.field{
+padding:14px 0;
 border-bottom:1px solid #eee;
-padding:12px 0;
 }
-.label{
+.field:last-child{
+border-bottom:none;
+}
+.field-label{
+font-size:16px;
 font-weight:800;
 color:#333;
+margin-bottom:8px;
 }
-.value{
+.field-value{
+font-size:20px;
+font-weight:500;
 color:#111;
-text-align:left;
-direction:ltr;
-}
-.value.rtl{
-direction:rtl;
-text-align:left;
+word-break:break-word;
 }
 </style>
 </head>
@@ -351,13 +354,13 @@ text-align:left;
 <div class="title">אישור תשלום</div>
 <div class="ok">התשלום עבר בהצלחה ✅</div>
 
-<div class="rows">
-${row("שם המשלם", customerName)}
-${row("מספר הזמנה", effectiveOrderId)}
-${row("טלפון", phone)}
-${row("סכום העסקה", amount ? amount + " ₪" : "")}
-${row("תאריך ושעת העסקה", transactionDateTime)}
-${row("מספר אישור", approval)}
+<div class="fields">
+${block("שם המשלם", customerName)}
+${block("מספר הזמנה", effectiveOrderId)}
+${block("טלפון", phone)}
+${block("סכום העסקה", amount ? amount + " ₪" : "")}
+${block("תאריך ושעת העסקה", transactionDateTime)}
+${block("מספר אישור", approval)}
 </div>
 </div>
 </body>
