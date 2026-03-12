@@ -1,5 +1,6 @@
 const express = require("express");
 const crypto = require("crypto");
+const { google } = require("googleapis");
 
 const app = express();
 
@@ -13,6 +14,12 @@ const BASE_URL = String(process.env.BASE_URL || "").trim();
 const ZC_KEY = String(process.env.ZC_KEY || "").trim();
 const ZC_TERMINAL = String(process.env.ZC_TERMINAL || "").trim();
 const ZC_PASSWORD = String(process.env.ZC_PASSWORD || "").trim();
+
+const GOOGLE_SERVICE_EMAIL = String(process.env.GOOGLE_SERVICE_EMAIL || "").trim();
+const GOOGLE_PRIVATE_KEY = String(process.env.GOOGLE_PRIVATE_KEY || "").trim();
+const GOOGLE_SHEET_ID = String(process.env.GOOGLE_SHEET_ID || "").trim();
+
+const SHEET_NAME = "payments";
 
 const receiptsByUniqueId = new Map();
 const receiptsByOrderId = new Map();
@@ -103,6 +110,38 @@ function getReceipt(uniqueId, orderId) {
   return null;
 }
 
+async function appendPaidPaymentToSheet({ token, orderId, phone, amount, approvalNumber, paymentDate }) {
+  if (!GOOGLE_SERVICE_EMAIL || !GOOGLE_PRIVATE_KEY || !GOOGLE_SHEET_ID) {
+    throw new Error("Missing Google Sheets environment variables");
+  }
+
+  const auth = new google.auth.JWT(
+    GOOGLE_SERVICE_EMAIL,
+    null,
+    GOOGLE_PRIVATE_KEY.replace(/\\n/g, "\n"),
+    ["https://www.googleapis.com/auth/spreadsheets"]
+  );
+
+  const sheets = google.sheets({ version: "v4", auth });
+
+  await sheets.spreadsheets.values.append({
+    spreadsheetId: GOOGLE_SHEET_ID,
+    range: `${SHEET_NAME}!A:G`,
+    valueInputOption: "USER_ENTERED",
+    requestBody: {
+      values: [[
+        String(token || ""),
+        String(orderId || ""),
+        String(phone || ""),
+        String(amount || ""),
+        String(approvalNumber || ""),
+        String(paymentDate || ""),
+        "no"
+      ]]
+    }
+  });
+}
+
 async function createZCreditSession({ orderId, amount, name, phone }) {
   const cleanId = cleanOrderId(orderId);
   const customerName = String(name || "").trim();
@@ -110,21 +149,10 @@ async function createZCreditSession({ orderId, amount, name, phone }) {
   const phone972 = normalizePhoneDigits(phone);
   const phoneLocal = normalizePhoneLocal(phone);
 
-  if (!cleanId) {
-    throw new Error("Invalid orderId");
-  }
-
-  if (!customerName) {
-    throw new Error("Missing name");
-  }
-
-  if (!Number.isFinite(amountNumber) || amountNumber <= 0) {
-    throw new Error("Invalid amount");
-  }
-
-  if (!phone972) {
-    throw new Error("Invalid phone");
-  }
+  if (!cleanId) throw new Error("Invalid orderId");
+  if (!customerName) throw new Error("Missing name");
+  if (!Number.isFinite(amountNumber) || amountNumber <= 0) throw new Error("Invalid amount");
+  if (!phone972) throw new Error("Invalid phone");
 
   const uniqueId = "order-" + cleanId + "-" + Date.now() + "-" + randomId();
 
@@ -132,7 +160,8 @@ async function createZCreditSession({ orderId, amount, name, phone }) {
     customerName,
     phone: phoneLocal,
     orderId: cleanId,
-    amount: amountNumber
+    amount: amountNumber,
+    appendedToSheet: false
   });
 
   const payload = {
@@ -395,7 +424,7 @@ ${block("מספר אישור", approval)}
 `;
 }
 
-function handleZcCallback(req, res) {
+async function handleZcCallback(req, res) {
   try {
     const body = req.body || {};
 
@@ -403,17 +432,35 @@ function handleZcCallback(req, res) {
     const orderId = cleanOrderId(body.AdditionalText || "");
     const existing = getReceipt(uniqueId, orderId) || {};
 
+    const paymentDate = formatIsraelDateTime(new Date());
+
     const receipt = {
       ...existing,
       uniqueId: uniqueId || existing.uniqueId || "",
       orderId: cleanOrderId(orderId || existing.orderId || ""),
       approval: String(body.ApprovalNumber || existing.approval || "").trim(),
-      transactionDateTimeFormatted: formatIsraelDateTime(new Date())
+      transactionDateTimeFormatted: paymentDate
     };
 
     saveReceipt(receipt.uniqueId, receipt.orderId, receipt);
+
+    // פה בדיוק החיבור לזד-קרדיט + גוגל שיטס:
+    // ברגע שה-callback מגיע, נוסיף שורה לשיטס רק פעם אחת
+    if (!receipt.appendedToSheet) {
+      await appendPaidPaymentToSheet({
+        token: receipt.uniqueId,
+        orderId: receipt.orderId,
+        phone: receipt.phone || "",
+        amount: receipt.amount || "",
+        approvalNumber: receipt.approval || "",
+        paymentDate
+      });
+
+      receipt.appendedToSheet = true;
+      saveReceipt(receipt.uniqueId, receipt.orderId, receipt);
+    }
   } catch (err) {
-    console.error(err);
+    console.error("zc-callback error:", err);
   }
 
   res.send("OK");
