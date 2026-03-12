@@ -133,6 +133,7 @@ async function createZCreditSession({ orderId, amount, name, phone }) {
     Currency: "ILS",
     Total: amountNumber,
     AdditionalText: cleanId,
+    ShowCart: false,
     Customer: {
       Name: customerName,
       PhoneNumber: phone972
@@ -273,7 +274,7 @@ function renderSuccess({ receipt, orderIdFromUrl }) {
   function block(label, value) {
     if (!value || String(value).trim() === "") return "";
     return `
-<div class="field">
+<div class="field-block">
   <div class="field-label">${htmlEscape(label)}</div>
   <div class="field-value">${htmlEscape(value)}</div>
 </div>
@@ -324,23 +325,26 @@ font-weight:800;
 .fields{
 margin-top:10px;
 }
-.field{
-padding:14px 0;
+.field-block{
+padding:16px 0;
 border-bottom:1px solid #eee;
 }
-.field:last-child{
+.field-block:last-child{
 border-bottom:none;
 }
 .field-label{
 font-size:16px;
 font-weight:800;
 color:#333;
-margin-bottom:8px;
+margin-bottom:10px;
+text-align:center;
 }
 .field-value{
-font-size:20px;
+font-size:22px;
 font-weight:500;
 color:#111;
+text-align:center;
+direction:rtl;
 word-break:break-word;
 }
 </style>
