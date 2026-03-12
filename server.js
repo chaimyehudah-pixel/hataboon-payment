@@ -56,7 +56,10 @@ uniqueId,
 orderId
 }
 
+if(uniqueId)
 receiptsByUniqueId.set(uniqueId,rec)
+
+if(orderId)
 receiptsByOrderId.set(orderId,rec)
 
 }
@@ -414,11 +417,18 @@ app.get("/payment-success",(req,res)=>{
 const orderId=cleanOrderId(req.query.orderId)
 const uniqueId=req.query.uniqueId
 
-const receipt=getReceipt(uniqueId,orderId)||{
-orderId,
+let receipt=getReceipt(uniqueId,orderId)
+
+if(!receipt){
+
+receipt={
+orderId:orderId,
 customerName:"",
 phone:"",
-amount:""
+amount:"",
+approval:""
+}
+
 }
 
 res.send(renderSuccess({receipt}))
