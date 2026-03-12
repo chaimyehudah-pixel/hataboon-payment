@@ -21,6 +21,10 @@ function cleanOrderId(v) {
   return String(v || "").replace(/\D/g, "");
 }
 
+function cleanPhone(v) {
+  return String(v || "").replace(/[^\d]/g, "");
+}
+
 function htmlEscape(str) {
   return String(str || "")
     .replace(/&/g, "&amp;")
@@ -34,7 +38,7 @@ function randomId() {
 }
 
 function normalizePhoneDigits(phoneRaw) {
-  let d = String(phoneRaw || "").replace(/[^\d]/g, "");
+  let d = cleanPhone(phoneRaw);
   if (!d) return "";
   if (d.startsWith("00972")) d = d.slice(2);
   if (d.startsWith("0") && d.length === 10) d = "972" + d.slice(1);
@@ -42,10 +46,11 @@ function normalizePhoneDigits(phoneRaw) {
 }
 
 function normalizePhoneLocal(phoneRaw) {
-  let d = String(phoneRaw || "").replace(/[^\d]/g, "");
+  let d = cleanPhone(phoneRaw);
   if (!d) return "";
   if (d.startsWith("00972")) d = d.slice(2);
-  if (d.startsWith("972")) return "0" + d.slice(3, 12);
+  if (d.startsWith("972") && d.length >= 12) return "0" + d.slice(3, 12);
+  if (d.startsWith("0")) return d.slice(0, 10);
   return d.slice(0, 10);
 }
 
@@ -104,6 +109,22 @@ async function createZCreditSession({ orderId, amount, name, phone }) {
   const amountNumber = Number(amount);
   const phone972 = normalizePhoneDigits(phone);
   const phoneLocal = normalizePhoneLocal(phone);
+
+  if (!cleanId) {
+    throw new Error("Invalid orderId");
+  }
+
+  if (!customerName) {
+    throw new Error("Missing name");
+  }
+
+  if (!Number.isFinite(amountNumber) || amountNumber <= 0) {
+    throw new Error("Invalid amount");
+  }
+
+  if (!phone972) {
+    throw new Error("Invalid phone");
+  }
 
   const uniqueId = "order-" + cleanId + "-" + Date.now() + "-" + randomId();
 
@@ -167,7 +188,7 @@ async function createZCreditSession({ orderId, amount, name, phone }) {
   throw new Error(JSON.stringify(data));
 }
 
-function renderPaymentPage({ orderId, amount }) {
+function renderPaymentPage({ orderId, amount, phone }) {
   return `
 <!doctype html>
 <html lang="he" dir="rtl">
@@ -246,7 +267,7 @@ margin:0 0 20px;
 <input name="name" required>
 
 <label>טלפון</label>
-<input name="phone" required>
+<input name="phone" value="${htmlEscape(phone)}" required>
 
 <button type="submit">מעבר לתשלום</button>
 </form>
@@ -400,11 +421,23 @@ app.get("/", (req, res) => {
   res.send("Hataboon Payment Server Running 🍕");
 });
 
+// פורמט חדש:
+// /pay/:phone/:orderId/:amount
+app.get("/pay/:phone/:orderId/:amount", (req, res) => {
+  const phone = normalizePhoneLocal(req.params.phone);
+  const orderId = cleanOrderId(req.params.orderId);
+  const amount = req.params.amount;
+
+  res.send(renderPaymentPage({ orderId, amount, phone }));
+});
+
+// תאימות לקישורים ישנים:
+// /pay/:orderId/:amount
 app.get("/pay/:orderId/:amount", (req, res) => {
   const orderId = cleanOrderId(req.params.orderId);
   const amount = req.params.amount;
 
-  res.send(renderPaymentPage({ orderId, amount }));
+  res.send(renderPaymentPage({ orderId, amount, phone: "" }));
 });
 
 app.post("/create-session", async (req, res) => {
