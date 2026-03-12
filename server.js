@@ -313,60 +313,62 @@ function renderSuccess({ receipt, orderIdFromUrl }) {
 body{
 font-family:Arial,Helvetica,sans-serif;
 background:#f4f4f4;
-padding:20px;
+padding:14px;
 margin:0;
 }
 .card{
-max-width:520px;
-margin:40px auto;
+max-width:500px;
+margin:18px auto;
 background:#fff;
 border-radius:20px;
-padding:30px 24px;
-box-shadow:0 10px 30px rgba(0,0,0,.1);
+padding:18px 18px;
+box-shadow:0 8px 22px rgba(0,0,0,.08);
 text-align:center;
 }
 .logo{
-margin-bottom:14px;
+margin-bottom:6px;
 }
 .logo img{
-max-width:220px;
+max-width:180px;
 height:auto;
 }
 .title{
-font-size:32px;
+font-size:24px;
 font-weight:900;
-margin:10px 0 8px;
+margin:4px 0 4px;
 }
 .ok{
-font-size:22px;
+font-size:16px;
 color:#1a7f37;
-margin-bottom:24px;
+margin-bottom:12px;
 font-weight:800;
 }
 .fields{
-margin-top:10px;
+margin-top:4px;
 }
 .field-block{
-padding:16px 0;
+padding:10px 0 8px;
 border-bottom:1px solid #eee;
 }
 .field-block:last-child{
 border-bottom:none;
 }
 .field-label{
-font-size:16px;
+font-size:13px;
 font-weight:800;
 color:#333;
-margin-bottom:10px;
+margin-bottom:4px;
 text-align:center;
+line-height:1.2;
 }
 .field-value{
-font-size:22px;
+font-size:18px;
 font-weight:500;
 color:#111;
 text-align:center;
 direction:rtl;
 word-break:break-word;
+line-height:1.15;
 }
 </style>
 </head>
@@ -421,8 +423,6 @@ app.get("/", (req, res) => {
   res.send("Hataboon Payment Server Running 🍕");
 });
 
-// פורמט חדש:
-// /pay/:phone/:orderId/:amount
 app.get("/pay/:phone/:orderId/:amount", (req, res) => {
   const phone = normalizePhoneLocal(req.params.phone);
   const orderId = cleanOrderId(req.params.orderId);
@@ -431,8 +431,6 @@ app.get("/pay/:phone/:orderId/:amount", (req, res) => {
   res.send(renderPaymentPage({ orderId, amount, phone }));
 });
 
-// תאימות לקישורים ישנים:
-// /pay/:orderId/:amount
 app.get("/pay/:orderId/:amount", (req, res) => {
   const orderId = cleanOrderId(req.params.orderId);
   const amount = req.params.amount;
