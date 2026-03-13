@@ -15,8 +15,7 @@ const ZC_KEY = String(process.env.ZC_KEY || "").trim();
 const ZC_TERMINAL = String(process.env.ZC_TERMINAL || "").trim();
 const ZC_PASSWORD = String(process.env.ZC_PASSWORD || "").trim();
 
-const GOOGLE_SERVICE_EMAIL = String(process.env.GOOGLE_SERVICE_EMAIL || "").trim();
-const GOOGLE_PRIVATE_KEY = String(process.env.GOOGLE_PRIVATE_KEY || "").trim();
+const GOOGLE_SERVICE_ACCOUNT = String(process.env.GOOGLE_SERVICE_ACCOUNT || "").trim();
 const GOOGLE_SHEET_ID = String(process.env.GOOGLE_SHEET_ID || "").trim();
 
 const SHEET_NAME = "payments";
@@ -110,19 +109,41 @@ function getReceipt(uniqueId, orderId) {
   return null;
 }
 
+function getGoogleCredentials() {
+  if (!GOOGLE_SERVICE_ACCOUNT) {
+    throw new Error("Missing GOOGLE_SERVICE_ACCOUNT");
+  }
+
+  let credentials;
+  try {
+    credentials = JSON.parse(GOOGLE_SERVICE_ACCOUNT);
+  } catch (err) {
+    throw new Error("GOOGLE_SERVICE_ACCOUNT is not valid JSON");
+  }
+
+  if (!credentials.client_email || !credentials.private_key) {
+    throw new Error("GOOGLE_SERVICE_ACCOUNT missing client_email or private_key");
+  }
+
+  return credentials;
+}
+
 async function appendPaidPaymentToSheet({ token, orderId, phone, amount, approvalNumber, paymentDate }) {
-  if (!GOOGLE_SERVICE_EMAIL || !GOOGLE_PRIVATE_KEY || !GOOGLE_SHEET_ID) {
+  if (!GOOGLE_SERVICE_ACCOUNT || !GOOGLE_SHEET_ID) {
     throw new Error("Missing Google Sheets environment variables");
   }
 
-  console.log("DEBUG GOOGLE_SERVICE_EMAIL length:", GOOGLE_SERVICE_EMAIL.length);
-  console.log("DEBUG GOOGLE_PRIVATE_KEY length:", GOOGLE_PRIVATE_KEY.length);
+  const credentials = getGoogleCredentials();
+
+  console.log("DEBUG GOOGLE_SERVICE_ACCOUNT length:", GOOGLE_SERVICE_ACCOUNT.length);
   console.log("DEBUG GOOGLE_SHEET_ID length:", GOOGLE_SHEET_ID.length);
+  console.log("DEBUG GOOGLE client_email exists:", !!credentials.client_email);
+  console.log("DEBUG GOOGLE private_key exists:", !!credentials.private_key);
 
   const auth = new google.auth.JWT(
-    GOOGLE_SERVICE_EMAIL,
+    credentials.client_email,
     null,
-    GOOGLE_PRIVATE_KEY.replace(/\\n/g, "\n"),
+    credentials.private_key,
     ["https://www.googleapis.com/auth/spreadsheets"]
   );
 
