@@ -115,7 +115,7 @@ function getGoogleCredentials() {
   return credentials;
 }
 
-async function appendPaidPaymentToSheet({ token, orderId, name, phone, amount, approvalNumber, paymentDate }) {
+function createSheetsClient() {
   const credentials = getGoogleCredentials();
 
   const auth = new google.auth.GoogleAuth({
@@ -123,12 +123,16 @@ async function appendPaidPaymentToSheet({ token, orderId, name, phone, amount, a
     scopes: ["https://www.googleapis.com/auth/spreadsheets"]
   });
 
-  const sheets = google.sheets({ version: "v4", auth });
+  return google.sheets({ version: "v4", auth });
+}
+
+async function appendPaidPaymentToSheet({ token, orderId, name, phone, amount, approvalNumber, paymentDate }) {
+  const sheets = createSheetsClient();
 
   await sheets.spreadsheets.values.append({
     spreadsheetId: GOOGLE_SHEET_ID,
     range: `${SHEET_NAME}!A:H`,
-    valueInputOption: "USER_ENTERED",
+    valueInputOption: "RAW",
     requestBody: {
       values: [[
         String(token || ""),
@@ -142,6 +146,41 @@ async function appendPaidPaymentToSheet({ token, orderId, name, phone, amount, a
       ]]
     }
   });
+}
+
+async function findPaymentByTokenInSheet(token) {
+  const cleanToken = String(token || "").trim();
+  if (!cleanToken) return null;
+
+  const sheets = createSheetsClient();
+
+  const response = await sheets.spreadsheets.values.get({
+    spreadsheetId: GOOGLE_SHEET_ID,
+    range: `${SHEET_NAME}!A:H`
+  });
+
+  const rows = response.data.values || [];
+  if (rows.length < 2) return null;
+
+  for (let i = 1; i < rows.length; i++) {
+    const row = rows[i] || [];
+    const rowToken = String(row[0] || "").trim();
+
+    if (rowToken === cleanToken) {
+      return {
+        token: String(row[0] || "").trim(),
+        orderId: cleanOrderId(row[1] || ""),
+        customerName: String(row[2] || "").trim(),
+        phone: String(row[3] || "").trim(),
+        amount: String(row[4] || "").trim(),
+        approval: String(row[5] || "").trim(),
+        transactionDateTimeFormatted: String(row[6] || "").trim(),
+        handled: String(row[7] || "").trim()
+      };
+    }
+  }
+
+  return null;
 }
 
 async function createZCreditSession({ orderId, amount, name, phone }) {
@@ -506,27 +545,39 @@ app.post("/create-session", async (req, res) => {
 
 app.all("/zc-callback", handleZcCallback);
 
-app.get("/payment-success", (req, res) => {
-  const orderIdFromUrl = cleanOrderId(req.query.orderId || "");
-  const uniqueId = String(req.query.uniqueId || "").trim();
+app.get("/payment-success", async (req, res) => {
+  try {
+    const orderIdFromUrl = cleanOrderId(req.query.orderId || "");
+    const uniqueId = String(req.query.uniqueId || "").trim();
 
-  const existing = getReceipt(uniqueId, orderIdFromUrl) || {};
+    let receipt = null;
 
-  const receipt = {
-    ...existing,
-    uniqueId: uniqueId || existing.uniqueId || "",
-    orderId: cleanOrderId(existing.orderId || orderIdFromUrl || ""),
-    customerName: String(existing.customerName || "").trim(),
-    phone: String(existing.phone || "").trim(),
-    amount:
-      existing.amount !== undefined && existing.amount !== null
-        ? existing.amount
-        : "",
-    approval: String(existing.approval || "").trim(),
-    transactionDateTimeFormatted: String(existing.transactionDateTimeFormatted || "").trim()
-  };
+    if (uniqueId) {
+      receipt = await findPaymentByTokenInSheet(uniqueId);
+    }
 
-  res.send(renderSuccess({ receipt, orderIdFromUrl }));
+    if (!receipt) {
+      const existing = getReceipt(uniqueId, orderIdFromUrl) || {};
+
+      receipt = {
+        uniqueId: uniqueId || existing.uniqueId || "",
+        orderId: cleanOrderId(existing.orderId || orderIdFromUrl || ""),
+        customerName: String(existing.customerName || "").trim(),
+        phone: String(existing.phone || "").trim(),
+        amount:
+          existing.amount !== undefined && existing.amount !== null
+            ? String(existing.amount).trim()
+            : "",
+        approval: String(existing.approval || "").trim(),
+        transactionDateTimeFormatted: String(existing.transactionDateTimeFormatted || "").trim()
+      };
+    }
+
+    res.send(renderSuccess({ receipt, orderIdFromUrl }));
+  } catch (err) {
+    console.error("payment-success error:", err);
+    res.send("שגיאה בהצגת אישור התשלום");
+  }
 });
 
 app.get("/payment-cancel", (req, res) => {
