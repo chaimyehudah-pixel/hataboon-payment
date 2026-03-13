@@ -143,7 +143,7 @@ async function appendPaidPaymentToSheet({ token, orderId, phone, amount, approva
   const auth = new google.auth.JWT(
     credentials.client_email,
     null,
-    credentials.private_key,
+    credentials.private_key.replace(/\\n/g, "\n"),
     ["https://www.googleapis.com/auth/spreadsheets"]
   );
 
