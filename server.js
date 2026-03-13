@@ -115,6 +115,10 @@ async function appendPaidPaymentToSheet({ token, orderId, phone, amount, approva
     throw new Error("Missing Google Sheets environment variables");
   }
 
+  console.log("DEBUG GOOGLE_SERVICE_EMAIL length:", GOOGLE_SERVICE_EMAIL.length);
+  console.log("DEBUG GOOGLE_PRIVATE_KEY length:", GOOGLE_PRIVATE_KEY.length);
+  console.log("DEBUG GOOGLE_SHEET_ID length:", GOOGLE_SHEET_ID.length);
+
   const auth = new google.auth.JWT(
     GOOGLE_SERVICE_EMAIL,
     null,
