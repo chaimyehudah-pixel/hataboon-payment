@@ -122,6 +122,8 @@ async function appendPaidPaymentToSheet({ token, orderId, phone, amount, approva
     ["https://www.googleapis.com/auth/spreadsheets"]
   );
 
+  await auth.authorize();
+
   const sheets = google.sheets({ version: "v4", auth });
 
   await sheets.spreadsheets.values.append({
@@ -444,8 +446,6 @@ async function handleZcCallback(req, res) {
 
     saveReceipt(receipt.uniqueId, receipt.orderId, receipt);
 
-    // פה בדיוק החיבור לזד-קרדיט + גוגל שיטס:
-    // ברגע שה-callback מגיע, נוסיף שורה לשיטס רק פעם אחת
     if (!receipt.appendedToSheet) {
       await appendPaidPaymentToSheet({
         token: receipt.uniqueId,
