@@ -125,6 +125,8 @@ function getGoogleCredentials() {
     throw new Error("GOOGLE_SERVICE_ACCOUNT missing client_email or private_key");
   }
 
+  credentials.private_key = String(credentials.private_key).replace(/\\n/g, "\n");
+
   return credentials;
 }
 
@@ -140,14 +142,10 @@ async function appendPaidPaymentToSheet({ token, orderId, phone, amount, approva
   console.log("DEBUG GOOGLE client_email exists:", !!credentials.client_email);
   console.log("DEBUG GOOGLE private_key exists:", !!credentials.private_key);
 
-  const auth = new google.auth.JWT(
-    credentials.client_email,
-    null,
-    credentials.private_key.replace(/\\n/g, "\n"),
-    ["https://www.googleapis.com/auth/spreadsheets"]
-  );
-
-  await auth.authorize();
+  const auth = new google.auth.GoogleAuth({
+    credentials,
+    scopes: ["https://www.googleapis.com/auth/spreadsheets"]
+  });
 
   const sheets = google.sheets({ version: "v4", auth });
 
