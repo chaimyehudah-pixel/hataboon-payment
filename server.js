@@ -183,6 +183,11 @@ async function findPaymentByTokenInSheet(token) {
   return null;
 }
 
+function hasRealApproval(body) {
+  const approvalNumber = String(body?.ApprovalNumber || "").trim();
+  return approvalNumber !== "";
+}
+
 async function createZCreditSession({ orderId, amount, name, phone }) {
   const cleanId = cleanOrderId(orderId);
   const customerName = String(name || "").trim();
@@ -472,6 +477,11 @@ async function handleZcCallback(req, res) {
     const uniqueId = String(body.UniqueID || "").trim();
     const orderId = cleanOrderId(body.AdditionalText || "");
     const existing = getReceipt(uniqueId, orderId) || {};
+
+    if (!hasRealApproval(body)) {
+      console.log("zc-callback received without real approval, skipping sheet write");
+      return res.send("OK");
+    }
 
     const paymentDate = formatIsraelDateTime(new Date());
 
