@@ -269,83 +269,101 @@ function renderPaymentPage({ orderId, amount, phone }) {
 <html lang="he" dir="rtl">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta
+  name="viewport"
+  content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover"
+/>
 <title>תשלום</title>
 <style>
+html{
+  -webkit-text-size-adjust:100%;
+  text-size-adjust:100%;
+  overflow-x:hidden;
+}
 body{
-font-family:Arial,Helvetica,sans-serif;
-background:#f4f4f4;
-padding:20px;
-margin:0;
+  font-family:Arial,Helvetica,sans-serif;
+  background:#f4f4f4;
+  padding:20px;
+  margin:0;
+  overflow-x:hidden;
+}
+*{
+  box-sizing:border-box;
 }
 .card{
-max-width:500px;
-margin:auto;
-background:#fff;
-border-radius:20px;
-padding:30px;
-box-shadow:0 10px 30px rgba(0,0,0,.1);
+  max-width:500px;
+  width:100%;
+  margin:auto;
+  background:#fff;
+  border-radius:20px;
+  padding:30px;
+  box-shadow:0 10px 30px rgba(0,0,0,.1);
 }
 .logo{
-text-align:center;
-margin-bottom:20px;
+  text-align:center;
+  margin-bottom:20px;
 }
 .logo img{
-max-width:200px;
+  max-width:200px;
+  width:100%;
+  height:auto;
+}
+button,
+input,
+select,
+textarea{
+  width:100%;
+  padding:12px;
+  border-radius:10px;
+  border:1px solid #ddd;
+  margin-top:6px;
+  box-sizing:border-box;
+  font-size:16px;
+  line-height:1.3;
+  -webkit-appearance:none;
+  appearance:none;
 }
 button{
-width:100%;
-padding:14px;
-border:0;
-border-radius:12px;
-background:#c40000;
-color:#fff;
-font-size:18px;
-font-weight:bold;
-cursor:pointer;
-margin-top:20px;
-}
-input{
-width:100%;
-padding:12px;
-border-radius:10px;
-border:1px solid #ddd;
-margin-top:6px;
-box-sizing:border-box;
+  border:0;
+  background:#c40000;
+  color:#fff;
+  font-weight:bold;
+  cursor:pointer;
+  margin-top:20px;
 }
 label{
-font-weight:bold;
-margin-top:14px;
-display:block;
+  font-weight:bold;
+  margin-top:14px;
+  display:block;
 }
 h2{
-text-align:center;
-margin:0 0 20px;
+  text-align:center;
+  margin:0 0 20px;
 }
 </style>
 </head>
 <body>
 <div class="card">
-<div class="logo">
-<img src="/logo.jpeg" alt="הטאבון">
-</div>
+  <div class="logo">
+    <img src="/logo.jpeg" alt="הטאבון">
+  </div>
 
-<h2>תשלום להזמנה #${htmlEscape(orderId)}</h2>
+  <h2>תשלום להזמנה #${htmlEscape(orderId)}</h2>
 
-<form method="POST" action="/create-session">
-<input type="hidden" name="orderId" value="${htmlEscape(orderId)}">
+  <form method="POST" action="/create-session">
+    <input type="hidden" name="orderId" value="${htmlEscape(orderId)}">
 
-<label>סכום לתשלום</label>
-<input name="amount" value="${htmlEscape(amount)}" required>
+    <label>סכום לתשלום</label>
+    <input name="amount" value="${htmlEscape(amount)}" inputmode="decimal" required>
 
-<label>שם מלא</label>
-<input name="name" required>
+    <label>שם מלא</label>
+    <input name="name" autocomplete="name" required>
 
-<label>טלפון</label>
-<input name="phone" value="${htmlEscape(phone)}" required>
+    <label>טלפון</label>
+    <input name="phone" value="${htmlEscape(phone)}" inputmode="tel" autocomplete="tel" required>
 
-<button type="submit">מעבר לתשלום</button>
-</form>
+    <button type="submit">מעבר לתשלום</button>
+  </form>
 </div>
 </body>
 </html>
@@ -382,88 +400,102 @@ function renderSuccess({ receipt, orderIdFromUrl }) {
 <html lang="he" dir="rtl">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta
+  name="viewport"
+  content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover"
+/>
 <title>אישור תשלום</title>
 <style>
+html{
+  -webkit-text-size-adjust:100%;
+  text-size-adjust:100%;
+  overflow-x:hidden;
+}
 body{
-font-family:Arial,Helvetica,sans-serif;
-background:#f4f4f4;
-padding:14px;
-margin:0;
+  font-family:Arial,Helvetica,sans-serif;
+  background:#f4f4f4;
+  padding:14px;
+  margin:0;
+  overflow-x:hidden;
+}
+*{
+  box-sizing:border-box;
 }
 .card{
-max-width:500px;
-margin:18px auto;
-background:#fff;
-border-radius:20px;
-padding:18px 18px;
-box-shadow:0 8px 22px rgba(0,0,0,.08);
-text-align:center;
+  max-width:500px;
+  width:100%;
+  margin:18px auto;
+  background:#fff;
+  border-radius:20px;
+  padding:18px 18px;
+  box-shadow:0 8px 22px rgba(0,0,0,.08);
+  text-align:center;
 }
 .logo{
-margin-bottom:6px;
+  margin-bottom:6px;
 }
 .logo img{
-max-width:180px;
-height:auto;
+  max-width:180px;
+  width:100%;
+  height:auto;
 }
 .title{
-font-size:24px;
-font-weight:900;
-margin:4px 0 4px;
+  font-size:24px;
+  font-weight:900;
+  margin:4px 0 4px;
 }
 .ok{
-font-size:16px;
-color:#1a7f37;
-margin-bottom:12px;
-font-weight:800;
+  font-size:16px;
+  color:#1a7f37;
+  margin-bottom:12px;
+  font-weight:800;
 }
 .fields{
-margin-top:4px;
+  margin-top:4px;
 }
 .field-block{
-padding:10px 0 8px;
-border-bottom:1px solid #eee;
+  padding:10px 0 8px;
+  border-bottom:1px solid #eee;
 }
 .field-block:last-child{
-border-bottom:none;
+  border-bottom:none;
 }
 .field-label{
-font-size:13px;
-font-weight:800;
-color:#333;
-margin-bottom:4px;
-text-align:center;
-line-height:1.2;
+  font-size:13px;
+  font-weight:800;
+  color:#333;
+  margin-bottom:4px;
+  text-align:center;
+  line-height:1.2;
 }
 .field-value{
-font-size:18px;
-font-weight:500;
-color:#111;
-text-align:center;
-direction:rtl;
-word-break:break-word;
-line-height:1.15;
+  font-size:18px;
+  font-weight:500;
+  color:#111;
+  text-align:center;
+  direction:rtl;
+  word-break:break-word;
+  line-height:1.15;
 }
 </style>
 </head>
 <body>
 <div class="card">
-<div class="logo">
-<img src="/logo.jpeg" alt="הטאבון">
-</div>
+  <div class="logo">
+    <img src="/logo.jpeg" alt="הטאבון">
+  </div>
 
-<div class="title">אישור תשלום</div>
-<div class="ok">התשלום עבר בהצלחה ✅</div>
+  <div class="title">אישור תשלום</div>
+  <div class="ok">התשלום עבר בהצלחה ✅</div>
 
-<div class="fields">
-${block("שם המשלם", customerName)}
-${block("מספר הזמנה", effectiveOrderId)}
-${block("טלפון", phone)}
-${block("סכום העסקה", amount ? amount + " ₪" : "")}
-${block("תאריך ושעת העסקה", transactionDateTime)}
-${block("מספר אישור", approval)}
-</div>
+  <div class="fields">
+    ${block("שם המשלם", customerName)}
+    ${block("מספר הזמנה", effectiveOrderId)}
+    ${block("טלפון", phone)}
+    ${block("סכום העסקה", amount ? amount + " ₪" : "")}
+    ${block("תאריך ושעת העסקה", transactionDateTime)}
+    ${block("מספר אישור", approval)}
+  </div>
 </div>
 </body>
 </html>
