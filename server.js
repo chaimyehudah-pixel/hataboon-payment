@@ -27,12 +27,15 @@ const BUSINESS_ADDRESS = "א.התעשייה קריית-ארבע - חברון";
 const BUSINESS_STREET = "רחוב משה בוסאני לוי 11";
 const BUSINESS_FULL_ADDRESS = `${BUSINESS_ADDRESS}, ${BUSINESS_STREET}`;
 const BUSINESS_CANCEL_PHONE = "029605556";
+const BUSINESS_CANCEL_PHONE_DISPLAY = "029605556";
 const BUSINESS_CANCEL_EXT_1 = "4";
 const BUSINESS_CANCEL_EXT_2 = "7";
 const BUSINESS_WHATSAPP_URL = "https://wa.me/972524150000";
 const BUSINESS_WHATSAPP_DISPLAY = "052-415-0000";
 const PAYMENT_ENTRY_URL = "https://hataboon-payment-production.up.railway.app/pay/0/0";
 const BUSINESS_ID_LABEL = "ע.מ. 021957303";
+const BUSINESS_WEBSITE_URL = "https://www.hataboon.co.il";
+const BUSINESS_WEBSITE_DISPLAY = "www.hataboon.co.il";
 
 const receiptsByUniqueId = new Map();
 const receiptsByOrderId = new Map();
@@ -74,10 +77,21 @@ function normalizePhoneLocal(phoneRaw) {
   return d.slice(0, 10);
 }
 
-function formatIsraelDateTime(dateValue) {
+function pad2(v) {
+  return String(v).padStart(2, "0");
+}
+
+function formatIsraelDateTimeParts(dateValue) {
   const d = dateValue instanceof Date ? dateValue : new Date(dateValue);
-  if (Number.isNaN(d.getTime())) return "";
-  return new Intl.DateTimeFormat("he-IL", {
+  if (Number.isNaN(d.getTime())) {
+    return {
+      date: "",
+      time: "",
+      combined: ""
+    };
+  }
+
+  const formatter = new Intl.DateTimeFormat("en-GB", {
     timeZone: "Asia/Jerusalem",
     year: "numeric",
     month: "2-digit",
@@ -86,7 +100,27 @@ function formatIsraelDateTime(dateValue) {
     minute: "2-digit",
     second: "2-digit",
     hour12: false
-  }).format(d);
+  });
+
+  const parts = formatter.formatToParts(d);
+  const get = (type) => parts.find((p) => p.type === type)?.value || "";
+
+  const day = get("day");
+  const month = get("month");
+  const year = get("year");
+  const hour = get("hour");
+  const minute = get("minute");
+  const second = get("second");
+
+  return {
+    date: `${day}.${month}.${year}`,
+    time: `${hour}:${minute}:${second}`,
+    combined: `${day}.${month}.${year}, ${hour}:${minute}:${second}`
+  };
+}
+
+function formatIsraelDateTime(dateValue) {
+  return formatIsraelDateTimeParts(dateValue).combined;
 }
 
 function saveReceipt(uniqueId, orderId, receipt) {
@@ -140,6 +174,34 @@ function createSheetsClient() {
   return google.sheets({ version: "v4", auth });
 }
 
+async function getNextReceiptSerial() {
+  if (!GOOGLE_SERVICE_ACCOUNT || !GOOGLE_SHEET_ID) {
+    return String(Date.now());
+  }
+
+  const sheets = createSheetsClient();
+
+  const response = await sheets.spreadsheets.values.get({
+    spreadsheetId: GOOGLE_SHEET_ID,
+    range: `${SHEET_NAME}!A:I`
+  });
+
+  const rows = response.data.values || [];
+  if (rows.length < 2) return "1";
+
+  let maxSerial = 0;
+
+  for (let i = 1; i < rows.length; i++) {
+    const row = rows[i] || [];
+    const serial = Number(String(row[8] || "").trim());
+    if (Number.isFinite(serial) && serial > maxSerial) {
+      maxSerial = serial;
+    }
+  }
+
+  return String(maxSerial + 1);
+}
+
 async function appendPaidPaymentToSheet({
   token,
   orderId,
@@ -147,7 +209,9 @@ async function appendPaidPaymentToSheet({
   phone,
   amount,
   approvalNumber,
-  paymentDate
+  paymentDate,
+  receiptSerial,
+  paymentLast4
 }) {
   if (!GOOGLE_SERVICE_ACCOUNT || !GOOGLE_SHEET_ID) return;
 
@@ -155,7 +219,7 @@ async function appendPaidPaymentToSheet({
 
   await sheets.spreadsheets.values.append({
     spreadsheetId: GOOGLE_SHEET_ID,
-    range: `${SHEET_NAME}!A:H`,
+    range: `${SHEET_NAME}!A:J`,
     valueInputOption: "RAW",
     requestBody: {
       values: [[
@@ -166,7 +230,9 @@ async function appendPaidPaymentToSheet({
         String(amount || ""),
         String(approvalNumber || ""),
         String(paymentDate || ""),
-        "no"
+        "no",
+        String(receiptSerial || ""),
+        String(paymentLast4 || "")
       ]]
     }
   });
@@ -181,7 +247,7 @@ async function findPaymentByTokenInSheet(token) {
 
   const response = await sheets.spreadsheets.values.get({
     spreadsheetId: GOOGLE_SHEET_ID,
-    range: `${SHEET_NAME}!A:H`
+    range: `${SHEET_NAME}!A:J`
   });
 
   const rows = response.data.values || [];
@@ -200,7 +266,9 @@ async function findPaymentByTokenInSheet(token) {
         amount: String(row[4] || "").trim(),
         approval: String(row[5] || "").trim(),
         transactionDateTimeFormatted: String(row[6] || "").trim(),
-        handled: String(row[7] || "").trim()
+        handled: String(row[7] || "").trim(),
+        receiptSerial: String(row[8] || "").trim(),
+        paymentLast4: String(row[9] || "").trim()
       };
     }
   }
@@ -221,7 +289,32 @@ function parsePositiveAmount(value) {
 }
 
 function renderWhatsAppLink() {
-  return `<a href="${BUSINESS_WHATSAPP_URL}" target="_blank" rel="noopener noreferrer">${htmlEscape(BUSINESS_WHATSAPP_DISPLAY)}</a>`;
+  return `<a class="nowrap-text" href="${BUSINESS_WHATSAPP_URL}" target="_blank" rel="noopener noreferrer">${htmlEscape(BUSINESS_WHATSAPP_DISPLAY)}</a>`;
+}
+
+function renderWebsiteLink() {
+  return `<a class="nowrap-text" href="${BUSINESS_WEBSITE_URL}" target="_blank" rel="noopener noreferrer">${htmlEscape(BUSINESS_WEBSITE_DISPLAY)}</a>`;
+}
+
+function extractPaymentLast4(body) {
+  const candidates = [
+    body?.CardMask,
+    body?.CardNum,
+    body?.CardNumber,
+    body?.Pan,
+    body?.PAN,
+    body?.CreditCard,
+    body?.TokenizedCardMask
+  ];
+
+  for (const value of candidates) {
+    const digits = cleanPhone(String(value || ""));
+    if (digits.length >= 4) {
+      return digits.slice(-4);
+    }
+  }
+
+  return "";
 }
 
 async function createZCreditSession({ orderId, amount, name, phone }) {
@@ -246,7 +339,9 @@ async function createZCreditSession({ orderId, amount, name, phone }) {
     phone: phoneLocal,
     orderId: cleanId,
     amount: amountNumber,
-    appendedToSheet: false
+    appendedToSheet: false,
+    receiptSerial: "",
+    paymentLast4: ""
   });
 
   const payload = {
@@ -339,7 +434,7 @@ body{
   display:flex;
   justify-content:space-between;
   align-items:flex-start;
-  min-height:36px;
+  min-height:52px;
   margin-bottom:4px;
 }
 .top-mini-right{
@@ -347,6 +442,16 @@ body{
   color:#6a4e1d;
   font-size:14px;
   line-height:1.25;
+}
+.top-mini-right .mini-line{
+  display:block;
+}
+.top-mini-right .mini-date,
+.top-mini-right .mini-time{
+  display:block;
+  font-size:12px;
+  color:#7a6747;
+  line-height:1.2;
 }
 .logo{
   text-align:center;
@@ -440,18 +545,16 @@ a.btn.primary{
   background:#d41108;
   color:#fff;
 }
-.footer-links{
-  display:flex;
-  justify-content:flex-end;
-  gap:16px;
-  margin-top:22px;
-  font-size:15px;
-  flex-wrap:wrap;
+a.btn.secondary{
+  border:0;
+  background:#2b55d4;
+  color:#fff;
 }
-.footer-links a{
-  color:#2b55d4;
-  text-decoration:none;
-  font-weight:700;
+.footer-buttons{
+  display:flex;
+  flex-direction:column;
+  gap:12px;
+  margin-top:22px;
 }
 .small-center{
   text-align:center;
@@ -476,7 +579,6 @@ a.btn.primary{
   font-size:22px;
   font-weight:700;
   color:#111;
-  word-break:break-word;
 }
 .success-title{
   text-align:center;
@@ -496,7 +598,14 @@ a.btn.primary{
   text-align:center;
   font-size:15px;
   color:#555;
+  margin:0 0 4px;
+}
+.receipt-serial{
+  text-align:center;
+  font-size:16px;
+  color:#333;
   margin:0 0 20px;
+  font-weight:700;
 }
 .print-btn{
   width:100%;
@@ -513,6 +622,14 @@ a.btn.primary{
   background:#2b55d4;
   color:#fff;
 }
+.nowrap-text{
+  white-space:nowrap;
+  display:inline-block;
+  word-break:normal;
+  overflow-wrap:normal;
+  direction:ltr;
+  unicode-bidi:isolate;
+}
 @media print{
   body{
     background:#fff;
@@ -527,7 +644,7 @@ a.btn.primary{
     padding:0;
     background:#fff;
   }
-  .footer-links,
+  .footer-buttons,
   .print-btn{
     display:none !important;
   }
@@ -561,13 +678,17 @@ a.btn.primary{
 `;
 }
 
-function renderHeaderMini() {
+function renderHeaderMini(dateValue = new Date()) {
+  const dt = formatIsraelDateTimeParts(dateValue);
+
   return `
     <div class="top-mini">
       <div></div>
       <div class="top-mini-right">
-        ${htmlEscape(BUSINESS_NAME)}<br>
-        ${htmlEscape(BUSINESS_PHONE_DISPLAY)}
+        <span class="mini-line">${htmlEscape(BUSINESS_NAME)}</span>
+        <span class="mini-line nowrap-text">${htmlEscape(BUSINESS_PHONE_DISPLAY)}</span>
+        <span class="mini-time">${htmlEscape(dt.time)}</span>
+        <span class="mini-date">${htmlEscape(dt.date)}</span>
       </div>
     </div>
     <div class="logo">
@@ -590,31 +711,31 @@ function renderBusinessInfoPage() {
       </div>
 
       <div class="notice">
-        זהו עמוד תשלום להזמנות טלפוניות, ולא חנות אינטרנטית עם סל קניות.
+        זהו עמוד תשלום בלבד עבור הזמנות טלפונית ולא חנות אינטרנטית.<br>
+        למעבר לחנות האינטרנטית המלאה ולצפייה בתפריט: ${renderWebsiteLink()}
       </div>
 
       <ul class="info-list">
         <li><strong>שם העסק:</strong> ${htmlEscape(BUSINESS_NAME)}</li>
         <li><strong>עוסק מורשה:</strong> ${htmlEscape(BUSINESS_ID_LABEL)}</li>
-        <li><strong>טלפון בית העסק:</strong> ${htmlEscape(BUSINESS_PHONE_DISPLAY)}</li>
+        <li><strong>טלפון בית העסק:</strong> <span class="nowrap-text">${htmlEscape(BUSINESS_PHONE_DISPLAY)}</span></li>
         <li><strong>כתובת העסק:</strong> ${htmlEscape(BUSINESS_FULL_ADDRESS)}</li>
-        <li><strong>שירותים/מוצרים:</strong> מכירת מזון והזמנות טלפוניות מבית העסק, לרבות תשלום מרחוק עבור הזמנה קיימת.</li>
+        <li><strong>שירותים / מוצרים:</strong> פיצרייה ובית קפה באיסוף עצמי, ישיבה במקום, ומשלוחים.</li>
       </ul>
 
       <div class="notice">
         <strong>הנהלת חשבונות</strong><br>
-        יש לשלוח צילום מסך לוואטסאפ: ${renderWhatsAppLink()}
+        הנהלת חשבונות זמינים לכם בוואטסאפ: ${renderWhatsAppLink()}
       </div>
 
       <div class="small-center">
         לבירורים, שינוי הזמנה או בקשת סיוע ניתן ליצור קשר עם בית העסק:
-        ${htmlEscape(BUSINESS_CANCEL_PHONE)} שלוחה ${htmlEscape(BUSINESS_CANCEL_EXT_1)}
+        <span class="nowrap-text">${htmlEscape(BUSINESS_CANCEL_PHONE_DISPLAY)}</span>
+        שלוחה ${htmlEscape(BUSINESS_CANCEL_EXT_1)}
       </div>
 
-      <div class="footer-links">
-        <a href="/">עמוד העסק</a>
-        <a href="/cancel-policy">מדיניות ביטולים וברורים כספיים</a>
-        <a href="${PAYMENT_ENTRY_URL}">מעבר לתשלום</a>
+      <div class="footer-buttons">
+        <a class="btn secondary" href="/cancel-policy">מדיניות ביטולים וברורי עסקאות</a>
       </div>
     `
   });
@@ -622,13 +743,14 @@ function renderBusinessInfoPage() {
 
 function renderCancelPolicyPage() {
   return renderLayout({
-    title: "מדיניות ביטולים וברורים כספיים",
+    title: "מדיניות ביטולים וברורי עסקאות",
     body: `
       ${renderHeaderMini()}
-      <h1>מדיניות ביטולים וברורים כספיים</h1>
+      <h1>מדיניות ביטולים וברורי עסקאות</h1>
 
       <p style="font-size:18px; line-height:1.8; text-align:right;">
-        לבקשת ביטול, שינוי הזמנה או בירור, יש להתקשר ל<strong>${htmlEscape(BUSINESS_CANCEL_PHONE)}</strong> שלוחה <strong>${htmlEscape(BUSINESS_CANCEL_EXT_1)}</strong>.
+        לבקשת ביטול, שינוי הזמנה או בירור, יש להתקשר ל<strong><span class="nowrap-text">${htmlEscape(BUSINESS_CANCEL_PHONE_DISPLAY)}</span></strong>
+        שלוחה <strong>${htmlEscape(BUSINESS_CANCEL_EXT_1)}</strong>.
         אם אין מענה אחרי חצי דקה, יש לעבור לשלוחה <strong>${htmlEscape(BUSINESS_CANCEL_EXT_2)}</strong>.
       </p>
 
@@ -643,16 +765,17 @@ function renderCancelPolicyPage() {
       </p>
 
       <p style="font-size:18px; line-height:1.8; text-align:right;">
-        במקרה של חיוב כפול או צורך בבדיקת חיוב, יש לשלוח צילום מסך לוואטסאפ:
+        במקרה של צורך בבירור כספי, ניתן לפנות גם לוואטסאפ:
         ${renderWhatsAppLink()}
       </p>
 
       <p style="font-size:18px; line-height:1.8; text-align:right;">
-        פרטי העסק: ${htmlEscape(BUSINESS_NAME)}, ${htmlEscape(BUSINESS_ID_LABEL)}, ${htmlEscape(BUSINESS_FULL_ADDRESS)}, טלפון: ${htmlEscape(BUSINESS_PHONE_DISPLAY)}.
+        פרטי העסק: ${htmlEscape(BUSINESS_NAME)}, ${htmlEscape(BUSINESS_ID_LABEL)}, ${htmlEscape(BUSINESS_FULL_ADDRESS)}, טלפון:
+        <span class="nowrap-text">${htmlEscape(BUSINESS_PHONE_DISPLAY)}</span>.
       </p>
 
-      <div class="footer-links">
-        <a href="/">עמוד העסק</a>
+      <div class="footer-buttons">
+        <a class="btn secondary" href="/">עמוד העסק</a>
       </div>
     `
   });
@@ -683,9 +806,9 @@ function renderPaymentPage({ orderId, amount, phone }) {
         <button type="submit">מעבר לתשלום</button>
       </form>
 
-      <div class="footer-links">
-        <a href="/">עמוד העסק</a>
-        <a href="/cancel-policy">מדיניות ביטולים וברורים כספיים</a>
+      <div class="footer-buttons">
+        <a class="btn secondary" href="/">עמוד העסק</a>
+        <a class="btn secondary" href="/cancel-policy">מדיניות ביטולים וברורי עסקאות</a>
       </div>
     `
   });
@@ -703,39 +826,43 @@ function renderSuccess({ receipt, orderIdFromUrl }) {
       : "";
   const approval = String(receipt.approval || "").trim();
   const transactionDateTime = String(receipt.transactionDateTimeFormatted || "").trim();
+  const receiptSerial = String(receipt.receiptSerial || "").trim();
+  const paymentLast4 = String(receipt.paymentLast4 || "").trim();
 
-  function block(label, value) {
+  function block(label, value, extraClass = "") {
     if (!value || String(value).trim() === "") return "";
     return `
       <div class="field-block">
         <div class="field-label">${htmlEscape(label)}</div>
-        <div class="field-value">${htmlEscape(value)}</div>
+        <div class="field-value ${extraClass}">${htmlEscape(value)}</div>
       </div>
     `;
   }
 
   return renderLayout({
-    title: "אישור תשלום / קבלה",
+    title: "קבלה / אישור תשלום",
     body: `
-      ${renderHeaderMini()}
-      <h1>אישור תשלום</h1>
+      ${renderHeaderMini(transactionDateTime || new Date())}
+      <h1>קבלה / אישור תשלום</h1>
       <div class="success-title">התשלום עבר בהצלחה ✅</div>
       <div class="receipt-subtitle">קבלה</div>
       <div class="receipt-id">${htmlEscape(BUSINESS_ID_LABEL)}</div>
+      ${receiptSerial ? `<div class="receipt-serial">מספר קבלה: ${htmlEscape(receiptSerial)}</div>` : ""}
 
-      ${block("שם המשלם", customerName)}
-      ${block("מספר הזמנה", effectiveOrderId)}
-      ${block("טלפון", phone)}
-      ${block("סכום העסקה", amount ? amount + " ₪" : "")}
-      ${block("תאריך ושעת העסקה", transactionDateTime)}
-      ${block("מספר אישור", approval)}
+      ${block("לכבוד:", customerName)}
+      ${block("תשלום עבור הזמנה:", effectiveOrderId)}
+      ${block("טלפון:", phone, "nowrap-text")}
+      ${block("סכום העסקה:", amount ? amount + " ₪" : "")}
+      ${block("תאריך ושעת העסקה:", transactionDateTime)}
+      ${block("מספר אישור:", approval)}
+      ${block("מספר אישור מחברת האשראי:", approval)}
+      ${block("4 ספרות אחרונות של אמצעי התשלום:", paymentLast4, "nowrap-text")}
 
       <button type="button" class="print-btn" onclick="window.print()">הורדת אישור PDF</button>
 
-      <div class="footer-links">
-        <a href="/">עמוד העסק</a>
-        <a href="/cancel-policy">מדיניות ביטולים וברורים כספיים</a>
-        <a href="${PAYMENT_ENTRY_URL}">מעבר לתשלום</a>
+      <div class="footer-buttons">
+        <a class="btn secondary" href="/">עמוד העסק</a>
+        <a class="btn secondary" href="/cancel-policy">מדיניות ביטולים וברורים כספיים</a>
       </div>
     `
   });
@@ -750,14 +877,14 @@ function renderCancelPage() {
       <div class="subtitle">לא בוצע חיוב. ניתן לבצע ניסיון נוסף במידת הצורך.</div>
 
       <div class="notice">
-        לביטול או בירור יש להתקשר ל-${htmlEscape(BUSINESS_CANCEL_PHONE)} שלוחה ${htmlEscape(BUSINESS_CANCEL_EXT_1)}.
+        לביטול או בירור יש להתקשר ל-<span class="nowrap-text">${htmlEscape(BUSINESS_CANCEL_PHONE_DISPLAY)}</span>
+        שלוחה ${htmlEscape(BUSINESS_CANCEL_EXT_1)}.
         אם אין מענה אחרי חצי דקה, שלוחה ${htmlEscape(BUSINESS_CANCEL_EXT_2)}.
       </div>
 
-      <div class="footer-links">
-        <a href="/">עמוד העסק</a>
-        <a href="/cancel-policy">מדיניות ביטולים וברורים כספיים</a>
-        <a href="${PAYMENT_ENTRY_URL}">מעבר לתשלום</a>
+      <div class="footer-buttons">
+        <a class="btn secondary" href="/">עמוד העסק</a>
+        <a class="btn secondary" href="/cancel-policy">מדיניות ביטולים וברורים כספיים</a>
       </div>
     `
   });
@@ -777,13 +904,21 @@ async function handleZcCallback(req, res) {
     }
 
     const paymentDate = formatIsraelDateTime(new Date());
+    const paymentLast4 = extractPaymentLast4(body);
+    let receiptSerial = String(existing.receiptSerial || "").trim();
+
+    if (!receiptSerial) {
+      receiptSerial = await getNextReceiptSerial();
+    }
 
     const receipt = {
       ...existing,
       uniqueId: uniqueId || existing.uniqueId || "",
       orderId: cleanOrderId(orderId || existing.orderId || ""),
       approval: String(body.ApprovalNumber || existing.approval || "").trim(),
-      transactionDateTimeFormatted: paymentDate
+      transactionDateTimeFormatted: paymentDate,
+      receiptSerial,
+      paymentLast4
     };
 
     saveReceipt(receipt.uniqueId, receipt.orderId, receipt);
@@ -796,7 +931,9 @@ async function handleZcCallback(req, res) {
         phone: receipt.phone || "",
         amount: receipt.amount || "",
         approvalNumber: receipt.approval || "",
-        paymentDate
+        paymentDate,
+        receiptSerial: receipt.receiptSerial || "",
+        paymentLast4: receipt.paymentLast4 || ""
       });
 
       receipt.appendedToSheet = true;
@@ -892,7 +1029,9 @@ app.get("/payment-success", async (req, res) => {
             ? String(existing.amount).trim()
             : "",
         approval: String(existing.approval || "").trim(),
-        transactionDateTimeFormatted: String(existing.transactionDateTimeFormatted || "").trim()
+        transactionDateTimeFormatted: String(existing.transactionDateTimeFormatted || "").trim(),
+        receiptSerial: String(existing.receiptSerial || "").trim(),
+        paymentLast4: String(existing.paymentLast4 || "").trim()
       };
     }
 
