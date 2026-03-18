@@ -32,6 +32,7 @@ const BUSINESS_CANCEL_EXT_2 = "7";
 const BUSINESS_WHATSAPP_URL = "https://wa.me/972524150000";
 const BUSINESS_WHATSAPP_DISPLAY = "052-415-0000";
 const PAYMENT_ENTRY_URL = "https://hataboon-payment-production.up.railway.app/pay/0/0";
+const BUSINESS_ID_LABEL = "ע.מ. 021957303";
 
 const receiptsByUniqueId = new Map();
 const receiptsByOrderId = new Map();
@@ -482,7 +483,54 @@ a.btn.primary{
   color:#1a7f37;
   font-size:20px;
   font-weight:800;
-  margin:6px 0 18px;
+  margin:6px 0 10px;
+}
+.receipt-subtitle{
+  text-align:center;
+  font-size:18px;
+  font-weight:700;
+  color:#222;
+  margin:0 0 4px;
+}
+.receipt-id{
+  text-align:center;
+  font-size:15px;
+  color:#555;
+  margin:0 0 20px;
+}
+.print-btn{
+  width:100%;
+  display:block;
+  text-align:center;
+  text-decoration:none;
+  border-radius:14px;
+  padding:15px 18px;
+  font-size:16px;
+  font-weight:700;
+  margin-top:16px;
+  cursor:pointer;
+  border:0;
+  background:#2b55d4;
+  color:#fff;
+}
+@media print{
+  body{
+    background:#fff;
+    padding:0;
+  }
+  .card{
+    max-width:none;
+    width:100%;
+    margin:0;
+    border-radius:0;
+    box-shadow:none;
+    padding:0;
+    background:#fff;
+  }
+  .footer-links,
+  .print-btn{
+    display:none !important;
+  }
 }
 @media (max-width: 640px){
   body{
@@ -547,6 +595,7 @@ function renderBusinessInfoPage() {
 
       <ul class="info-list">
         <li><strong>שם העסק:</strong> ${htmlEscape(BUSINESS_NAME)}</li>
+        <li><strong>עוסק מורשה:</strong> ${htmlEscape(BUSINESS_ID_LABEL)}</li>
         <li><strong>טלפון בית העסק:</strong> ${htmlEscape(BUSINESS_PHONE_DISPLAY)}</li>
         <li><strong>כתובת העסק:</strong> ${htmlEscape(BUSINESS_FULL_ADDRESS)}</li>
         <li><strong>שירותים/מוצרים:</strong> מכירת מזון והזמנות טלפוניות מבית העסק, לרבות תשלום מרחוק עבור הזמנה קיימת.</li>
@@ -599,7 +648,7 @@ function renderCancelPolicyPage() {
       </p>
 
       <p style="font-size:18px; line-height:1.8; text-align:right;">
-        פרטי העסק: ${htmlEscape(BUSINESS_NAME)}, ${htmlEscape(BUSINESS_FULL_ADDRESS)}, טלפון: ${htmlEscape(BUSINESS_PHONE_DISPLAY)}.
+        פרטי העסק: ${htmlEscape(BUSINESS_NAME)}, ${htmlEscape(BUSINESS_ID_LABEL)}, ${htmlEscape(BUSINESS_FULL_ADDRESS)}, טלפון: ${htmlEscape(BUSINESS_PHONE_DISPLAY)}.
       </p>
 
       <div class="footer-links">
@@ -666,11 +715,13 @@ function renderSuccess({ receipt, orderIdFromUrl }) {
   }
 
   return renderLayout({
-    title: "אישור תשלום",
+    title: "אישור תשלום / קבלה",
     body: `
       ${renderHeaderMini()}
       <h1>אישור תשלום</h1>
       <div class="success-title">התשלום עבר בהצלחה ✅</div>
+      <div class="receipt-subtitle">קבלה</div>
+      <div class="receipt-id">${htmlEscape(BUSINESS_ID_LABEL)}</div>
 
       ${block("שם המשלם", customerName)}
       ${block("מספר הזמנה", effectiveOrderId)}
@@ -678,6 +729,8 @@ function renderSuccess({ receipt, orderIdFromUrl }) {
       ${block("סכום העסקה", amount ? amount + " ₪" : "")}
       ${block("תאריך ושעת העסקה", transactionDateTime)}
       ${block("מספר אישור", approval)}
+
+      <button type="button" class="print-btn" onclick="window.print()">הורדת אישור PDF</button>
 
       <div class="footer-links">
         <a href="/">עמוד העסק</a>
