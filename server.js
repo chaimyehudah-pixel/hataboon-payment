@@ -22,11 +22,15 @@ const SHEET_NAME = "payments";
 
 const BUSINESS_NAME = "פיצת הטאבון";
 const BUSINESS_PHONE = "029605556";
-const BUSINESS_ADDRESS = 'א.התעשייה קריית-ארבע - חברון, רחוב משה בוסאני לוי 11';
+const BUSINESS_PHONE_DISPLAY = "029605556";
+const BUSINESS_ADDRESS = "א.התעשייה קריית-ארבע - חברון";
+const BUSINESS_STREET = "רחוב משה בוסאני לוי 11";
+const BUSINESS_FULL_ADDRESS = `${BUSINESS_ADDRESS}, ${BUSINESS_STREET}`;
 const BUSINESS_CANCEL_PHONE = "029605556";
 const BUSINESS_CANCEL_EXT_1 = "4";
 const BUSINESS_CANCEL_EXT_2 = "7";
 const BUSINESS_WHATSAPP_URL = "https://wa.me/972524150000";
+const BUSINESS_WHATSAPP_DISPLAY = "052-415-0000";
 
 const receiptsByUniqueId = new Map();
 const receiptsByOrderId = new Map();
@@ -214,6 +218,10 @@ function parsePositiveAmount(value) {
   return Number(amount.toFixed(2));
 }
 
+function renderWhatsAppLink() {
+  return `<a href="${BUSINESS_WHATSAPP_URL}" target="_blank" rel="noopener noreferrer">${htmlEscape(BUSINESS_WHATSAPP_DISPLAY)}</a>`;
+}
+
 async function createZCreditSession({ orderId, amount, name, phone }) {
   const cleanId = cleanOrderId(orderId);
   const customerName = String(name || "").trim();
@@ -308,8 +316,8 @@ html{
 }
 body{
   font-family:Arial,Helvetica,sans-serif;
-  background:#f4f4f4;
-  padding:16px;
+  background:#efefef;
+  padding:18px;
   margin:0;
   color:#111;
 }
@@ -319,26 +327,66 @@ body{
 .card{
   max-width:760px;
   width:100%;
-  margin:18px auto;
-  background:#fff;
-  border-radius:20px;
-  padding:24px;
-  box-shadow:0 10px 30px rgba(0,0,0,.08);
+  margin:0 auto;
+  background:#f8f8f8;
+  border-radius:30px;
+  padding:18px 24px 28px;
+  box-shadow:0 0 0 1px rgba(175,137,79,0.12) inset;
+}
+.top-mini{
+  display:flex;
+  justify-content:space-between;
+  align-items:flex-start;
+  min-height:36px;
+  margin-bottom:4px;
+}
+.top-mini-right{
+  text-align:right;
+  color:#6a4e1d;
+  font-size:14px;
+  line-height:1.25;
 }
 .logo{
   text-align:center;
-  margin-bottom:14px;
+  margin:0 0 8px;
 }
 .logo img{
-  max-width:190px;
+  max-width:230px;
   width:100%;
   height:auto;
 }
-h1,h2,h3{
-  margin-top:0;
+.address-line{
+  text-align:center;
+  font-size:14px;
+  color:#3f2f11;
+  margin:-6px auto 8px;
+  max-width:360px;
+  border-top:2px solid #ead9b2;
+  border-bottom:2px solid #ead9b2;
+  padding:2px 8px;
+}
+h1{
+  margin:0 0 8px;
+  text-align:center;
+  font-size:28px;
+  line-height:1.2;
 }
 p{
-  line-height:1.65;
+  line-height:1.55;
+}
+.subtitle{
+  text-align:center;
+  font-size:16px;
+  color:#333;
+  margin:8px 0 24px;
+}
+.notice{
+  background:#f6f0df;
+  border:1px solid #e2c978;
+  padding:14px 18px;
+  border-radius:14px;
+  margin:14px 0;
+  line-height:1.7;
 }
 .info-list{
   margin:0;
@@ -346,128 +394,158 @@ p{
   list-style:none;
 }
 .info-list li{
-  margin:10px 0;
-  padding:12px 14px;
-  background:#fafafa;
-  border:1px solid #eee;
+  margin:12px 0;
+  padding:14px 16px;
+  background:#f4f4f4;
+  border:1px solid #dddddd;
   border-radius:12px;
+  line-height:1.65;
+}
+label{
+  font-weight:700;
+  display:block;
+  margin:18px 0 8px;
+  font-size:16px;
+}
+input{
+  width:100%;
+  padding:14px 16px;
+  border-radius:14px;
+  border:1px solid #d2d2d2;
+  background:#fafafa;
+  font-size:16px;
+  outline:none;
+}
+input:focus{
+  border-color:#b79b5b;
 }
 button,
-input,
-select,
-textarea,
 a.btn{
   width:100%;
-  padding:12px;
-  border-radius:10px;
-  border:1px solid #ddd;
-  margin-top:10px;
-  box-sizing:border-box;
+  display:inline-block;
+  text-align:center;
+  text-decoration:none;
+  border-radius:14px;
+  padding:15px 18px;
   font-size:16px;
-  line-height:1.3;
-  -webkit-appearance:none;
-  appearance:none;
+  font-weight:700;
+  margin-top:16px;
+  cursor:pointer;
 }
 button,
 a.btn.primary{
   border:0;
-  background:#c40000;
+  background:#d41108;
   color:#fff;
-  font-weight:bold;
-  cursor:pointer;
-  text-decoration:none;
-  display:inline-block;
-  text-align:center;
-}
-a.btn.secondary{
-  background:#fff;
-  color:#111;
-  text-decoration:none;
 }
 a.btn.green{
   border:0;
   background:#1f8f4e;
   color:#fff;
-  font-weight:bold;
-  cursor:pointer;
-  text-decoration:none;
-  display:inline-block;
-  text-align:center;
-}
-label{
-  font-weight:bold;
-  margin-top:14px;
-  display:block;
-}
-.notice{
-  background:#fff8e8;
-  border:1px solid #f0d99b;
-  padding:12px 14px;
-  border-radius:12px;
-  margin:14px 0;
 }
 .footer-links{
-  margin-top:18px;
-  padding-top:14px;
-  border-top:1px solid #eee;
   display:flex;
-  flex-wrap:wrap;
-  gap:10px;
+  justify-content:flex-end;
+  gap:16px;
+  margin-top:22px;
+  font-size:15px;
 }
 .footer-links a{
-  color:#0b57d0;
+  color:#2b55d4;
   text-decoration:none;
 }
-.small{
-  font-size:14px;
+.small-center{
+  text-align:center;
   color:#444;
+  font-size:14px;
+  margin:6px 0 0;
 }
 .field-block{
-  padding:10px 0 8px;
-  border-bottom:1px solid #eee;
+  padding:12px 0;
+  border-bottom:1px solid #e5e5e5;
 }
 .field-block:last-child{
   border-bottom:none;
 }
 .field-label{
-  font-size:13px;
-  font-weight:800;
-  color:#333;
+  font-size:14px;
+  color:#444;
   margin-bottom:4px;
+  font-weight:700;
 }
 .field-value{
-  font-size:18px;
-  font-weight:500;
+  font-size:22px;
+  font-weight:700;
   color:#111;
   word-break:break-word;
 }
-.center{
+.success-title{
   text-align:center;
+  color:#1a7f37;
+  font-size:20px;
+  font-weight:800;
+  margin:6px 0 18px;
+}
+a.inline-link{
+  color:#2b55d4;
+  text-decoration:none;
+}
+@media (max-width: 640px){
+  body{
+    padding:10px;
+  }
+  .card{
+    padding:14px 14px 22px;
+    border-radius:24px;
+  }
+  h1{
+    font-size:24px;
+  }
+  .logo img{
+    max-width:190px;
+  }
+  .address-line{
+    font-size:13px;
+  }
 }
 </style>
 </head>
 <body>
 <div class="card">
-  <div class="logo">
-    <img src="/logo.jpeg" alt="${htmlEscape(BUSINESS_NAME)}">
-  </div>
   ${body}
-  <div class="footer-links">
-    <a href="/">עמוד העסק</a>
-    <a href="/cancel-policy">מדיניות ביטול</a>
-  </div>
 </div>
 </body>
 </html>
 `;
 }
 
+function renderHeaderMini() {
+  return `
+    <div class="top-mini">
+      <div></div>
+      <div class="top-mini-right">
+        ${htmlEscape(BUSINESS_NAME)}<br>
+        ${htmlEscape(BUSINESS_PHONE_DISPLAY)}
+      </div>
+    </div>
+    <div class="logo">
+      <img src="/logo.jpeg" alt="${htmlEscape(BUSINESS_NAME)}">
+    </div>
+    <div class="address-line">
+      ${htmlEscape(BUSINESS_STREET)} &nbsp;&nbsp; ${htmlEscape(BUSINESS_ADDRESS)}
+    </div>
+  `;
+}
+
 function renderBusinessInfoPage() {
   return renderLayout({
     title: BUSINESS_NAME,
     body: `
-      <h1 class="center">${htmlEscape(BUSINESS_NAME)}</h1>
-      <p class="center">עמוד זה משמש לתשלום עבור הזמנות שבוצעו טלפונית או ישירות מול בית העסק.</p>
+      ${renderHeaderMini()}
+      <h1>${htmlEscape(BUSINESS_NAME)}</h1>
+      <div class="subtitle">
+        אתר זה נועד עבור סליקת אשראי וביצוע תשלום עבור הזמנות שבוצעו טלפונית או ישירות מבית העסק
+      </div>
 
       <div class="notice">
         זהו עמוד תשלום להזמנות טלפוניות, ולא חנות אינטרנטית עם סל קניות.
@@ -475,65 +553,66 @@ function renderBusinessInfoPage() {
 
       <ul class="info-list">
         <li><strong>שם העסק:</strong> ${htmlEscape(BUSINESS_NAME)}</li>
-        <li><strong>טלפון בית העסק:</strong> ${htmlEscape(BUSINESS_PHONE)}</li>
-        <li><strong>כתובת העסק:</strong> ${htmlEscape(BUSINESS_ADDRESS)}</li>
+        <li><strong>טלפון בית העסק:</strong> ${htmlEscape(BUSINESS_PHONE_DISPLAY)}</li>
+        <li><strong>כתובת העסק:</strong> ${htmlEscape(BUSINESS_FULL_ADDRESS)}</li>
         <li><strong>שירותים/מוצרים:</strong> מכירת מזון והזמנות טלפוניות מבית העסק, לרבות תשלום מרחוק עבור הזמנה קיימת.</li>
       </ul>
 
       <div class="notice">
-        <strong>ביטול הזמנה:</strong><br>
-        יש להתקשר ל-${htmlEscape(BUSINESS_CANCEL_PHONE)} שלוחה ${htmlEscape(BUSINESS_CANCEL_EXT_1)}.<br>
-        אם אין מענה אחרי חצי דקה, יש לעבור לשלוחה ${htmlEscape(BUSINESS_CANCEL_EXT_2)}.
+        <strong>הנהלת חשבונות ובדיקת חיובים</strong><br>
+        יש לשלוח צילום מסך לוואטסאפ: ${renderWhatsAppLink()}
       </div>
 
-      <div class="notice">
-        <strong>בדיקת חיובים כפולים:</strong><br>
-        יש לשלוח צילום מסך לוואטסאפ:
-        <a href="${htmlEscape(BUSINESS_WHATSAPP_URL)}" target="_blank" rel="noopener noreferrer">052-415-0000</a>
+      <div class="small-center">
+        לבירורים, שינוי הזמנה או בקשת סיוע ניתן ליצור קשר עם בית העסק:
+        ${htmlEscape(BUSINESS_CANCEL_PHONE)} שלוחה ${htmlEscape(BUSINESS_CANCEL_EXT_1)}
       </div>
 
-      <a class="btn primary" href="/pay/1234/89">מעבר לעמוד תשלום לדוגמה</a>
-      <a class="btn green" href="${htmlEscape(BUSINESS_WHATSAPP_URL)}" target="_blank" rel="noopener noreferrer">לשליחת צילום מסך בוואטסאפ</a>
-
-      <p class="small">
-        לבירורים, שינוי הזמנה או בקשת סיוע ניתן ליצור קשר ישירות עם בית העסק.
-      </p>
+      <div class="footer-links">
+        <a href="/">עמוד העסק</a>
+        <a href="/cancel-policy">מדיניות ביטול</a>
+        <a href="/pay/1234/89" style="font-weight:700;color:#111;">מעבר לתשלום</a>
+      </div>
     `
   });
 }
 
 function renderCancelPolicyPage() {
   return renderLayout({
-    title: "מדיניות ביטול",
+    title: "מדיניות ביטול עסקה",
     body: `
-      <h1 class="center">מדיניות ביטול עסקה</h1>
+      ${renderHeaderMini()}
+      <h1>מדיניות ביטול עסקה</h1>
 
-      <p>
+      <p style="font-size:18px; line-height:1.8; text-align:right;">
         לבקשת ביטול, שינוי הזמנה או בירור, יש להתקשר ל<strong>${htmlEscape(BUSINESS_CANCEL_PHONE)}</strong> שלוחה <strong>${htmlEscape(BUSINESS_CANCEL_EXT_1)}</strong>.
         אם אין מענה אחרי חצי דקה, יש לעבור לשלוחה <strong>${htmlEscape(BUSINESS_CANCEL_EXT_2)}</strong>.
       </p>
 
-      <p>
+      <p style="font-size:18px; line-height:1.8; text-align:right;">
         בקשות לביטול עסקה, שינוי הזמנה, החזר או זיכוי ייבדקו ויטופלו בהתאם להוראות הדין החל על העסקה,
         סוג המוצר או השירות, ומועד הבקשה ביחס למועד הכנת ההזמנה או מסירתה.
       </p>
 
-      <p>
-        בעסקאות הנוגעות להזמנת מזון שהוכנה במיוחד עבור הלקוח או שהכנתה כבר החלה,
-        ייתכנו מגבלות על ביטול או החזר, בכפוף לדין.
+      <p style="font-size:18px; line-height:1.8; text-align:right;">
+        בעסקאות הנוגעות להזמנת מזון שהוכנה במיוחד עבור הלקוח או שהכנתה כבר החלה, ייתכנו מגבלות על ביטול או
+        החזר, בכפוף לדין.
       </p>
 
-      <p>
+      <p style="font-size:18px; line-height:1.8; text-align:right;">
         במקרה של חיוב כפול או צורך בבדיקת חיוב, יש לשלוח צילום מסך לוואטסאפ:
-        <a href="${htmlEscape(BUSINESS_WHATSAPP_URL)}" target="_blank" rel="noopener noreferrer">052-415-0000</a>.
+        ${renderWhatsAppLink()}
       </p>
 
-      <p>
-        פרטי העסק: ${htmlEscape(BUSINESS_NAME)}, ${htmlEscape(BUSINESS_ADDRESS)}, טלפון: ${htmlEscape(BUSINESS_PHONE)}.
+      <p style="font-size:18px; line-height:1.8; text-align:right;">
+        פרטי העסק: ${htmlEscape(BUSINESS_NAME)}, ${htmlEscape(BUSINESS_FULL_ADDRESS)}, טלפון: ${htmlEscape(BUSINESS_PHONE_DISPLAY)}.
       </p>
 
-      <a class="btn primary" href="/pay/1234/89">מעבר לעמוד תשלום לדוגמה</a>
-      <a class="btn green" href="${htmlEscape(BUSINESS_WHATSAPP_URL)}" target="_blank" rel="noopener noreferrer">לשליחת צילום מסך בוואטסאפ</a>
+      <div class="footer-links">
+        <a href="/">עמוד העסק</a>
+        <a href="/cancel-policy">מדיניות ביטול</a>
+        <a href="/pay/1234/89" style="font-weight:700;color:#111;">מעבר לתשלום</a>
+      </div>
     `
   });
 }
@@ -542,11 +621,11 @@ function renderPaymentPage({ orderId, amount, phone }) {
   return renderLayout({
     title: "תשלום להזמנה",
     body: `
-      <h1 class="center">תשלום להזמנה #${htmlEscape(orderId)}</h1>
-
-      <p class="center small">
+      ${renderHeaderMini()}
+      <h1>תשלום להזמנה #${htmlEscape(orderId)}</h1>
+      <div class="subtitle">
         תשלום זה מיועד להזמנה שבוצעה טלפונית או ישירות מול בית העסק.
-      </p>
+      </div>
 
       <form method="POST" action="/create-session">
         <input type="hidden" name="orderId" value="${htmlEscape(orderId)}">
@@ -563,26 +642,10 @@ function renderPaymentPage({ orderId, amount, phone }) {
         <button type="submit">מעבר לתשלום</button>
       </form>
 
-      <div class="notice">
-        <strong>פרטי העסק:</strong><br>
-        ${htmlEscape(BUSINESS_NAME)}<br>
-        ${htmlEscape(BUSINESS_PHONE)}<br>
-        ${htmlEscape(BUSINESS_ADDRESS)}
+      <div class="footer-links">
+        <a href="/">עמוד העסק</a>
+        <a href="/cancel-policy">מדיניות ביטול</a>
       </div>
-
-      <div class="notice">
-        <strong>לביטול:</strong><br>
-        התקשרו ל-${htmlEscape(BUSINESS_CANCEL_PHONE)} שלוחה ${htmlEscape(BUSINESS_CANCEL_EXT_1)}.<br>
-        אם אין מענה אחרי חצי דקה, עברו לשלוחה ${htmlEscape(BUSINESS_CANCEL_EXT_2)}.
-      </div>
-
-      <div class="notice">
-        <strong>לחיוב כפול / בדיקת חיוב:</strong><br>
-        שלחו צילום מסך לוואטסאפ:
-        <a href="${htmlEscape(BUSINESS_WHATSAPP_URL)}" target="_blank" rel="noopener noreferrer">052-415-0000</a>
-      </div>
-
-      <a class="btn green" href="${htmlEscape(BUSINESS_WHATSAPP_URL)}" target="_blank" rel="noopener noreferrer">לשליחת צילום מסך בוואטסאפ</a>
     `
   });
 }
@@ -591,14 +654,12 @@ function renderSuccess({ receipt, orderIdFromUrl }) {
   const customerName = String(receipt.customerName || "").trim();
   const effectiveOrderId = cleanOrderId(receipt.orderId || orderIdFromUrl || "");
   const phone = String(receipt.phone || "").trim();
-
   const amount =
     receipt.amount !== undefined &&
     receipt.amount !== null &&
     String(receipt.amount).trim() !== ""
       ? String(receipt.amount).trim()
       : "";
-
   const approval = String(receipt.approval || "").trim();
   const transactionDateTime = String(receipt.transactionDateTimeFormatted || "").trim();
 
@@ -615,8 +676,9 @@ function renderSuccess({ receipt, orderIdFromUrl }) {
   return renderLayout({
     title: "אישור תשלום",
     body: `
-      <h1 class="center">אישור תשלום</h1>
-      <p class="center" style="color:#1a7f37;font-weight:800;">התשלום עבר בהצלחה ✅</p>
+      ${renderHeaderMini()}
+      <h1>אישור תשלום</h1>
+      <div class="success-title">התשלום עבר בהצלחה ✅</div>
 
       ${block("שם המשלם", customerName)}
       ${block("מספר הזמנה", effectiveOrderId)}
@@ -626,8 +688,13 @@ function renderSuccess({ receipt, orderIdFromUrl }) {
       ${block("מספר אישור", approval)}
 
       <div class="notice">
-        אם נראה שבוצע חיוב כפול, יש לשלוח צילום מסך לוואטסאפ:
-        <a href="${htmlEscape(BUSINESS_WHATSAPP_URL)}" target="_blank" rel="noopener noreferrer">052-415-0000</a>
+        אם נראה שבוצע חיוב כפול, יש לשלוח צילום מסך לוואטסאפ: ${renderWhatsAppLink()}
+      </div>
+
+      <div class="footer-links">
+        <a href="/">עמוד העסק</a>
+        <a href="/cancel-policy">מדיניות ביטול</a>
+        <a href="/pay/1234/89" style="font-weight:700;color:#111;">מעבר לתשלום</a>
       </div>
     `
   });
@@ -637,16 +704,20 @@ function renderCancelPage() {
   return renderLayout({
     title: "התשלום בוטל",
     body: `
-      <h1 class="center">התשלום בוטל</h1>
-      <p class="center">לא בוצע חיוב. ניתן לבצע ניסיון נוסף במידת הצורך.</p>
+      ${renderHeaderMini()}
+      <h1>התשלום בוטל</h1>
+      <div class="subtitle">לא בוצע חיוב. ניתן לבצע ניסיון נוסף במידת הצורך.</div>
 
       <div class="notice">
-        לביטול או בירור: ${htmlEscape(BUSINESS_CANCEL_PHONE)} שלוחה ${htmlEscape(BUSINESS_CANCEL_EXT_1)}<br>
-        אם אין מענה אחרי חצי דקה, שלוחה ${htmlEscape(BUSINESS_CANCEL_EXT_2)}
+        לביטול או בירור יש להתקשר ל-${htmlEscape(BUSINESS_CANCEL_PHONE)} שלוחה ${htmlEscape(BUSINESS_CANCEL_EXT_1)}.
+        אם אין מענה אחרי חצי דקה, שלוחה ${htmlEscape(BUSINESS_CANCEL_EXT_2)}.
       </div>
 
-      <a class="btn primary" href="/pay/1234/89">מעבר לעמוד תשלום לדוגמה</a>
-      <a class="btn green" href="${htmlEscape(BUSINESS_WHATSAPP_URL)}" target="_blank" rel="noopener noreferrer">לשליחת צילום מסך בוואטסאפ</a>
+      <div class="footer-links">
+        <a href="/">עמוד העסק</a>
+        <a href="/cancel-policy">מדיניות ביטול</a>
+        <a href="/pay/1234/89" style="font-weight:700;color:#111;">מעבר לתשלום</a>
+      </div>
     `
   });
 }
