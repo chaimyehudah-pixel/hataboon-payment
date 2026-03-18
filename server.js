@@ -24,10 +24,6 @@ const BUSINESS_NAME = String(process.env.BUSINESS_NAME || "פיצת הטאבון
 const BUSINESS_PHONE = String(process.env.BUSINESS_PHONE || "058-6760000").trim();
 const BUSINESS_ADDRESS = String(process.env.BUSINESS_ADDRESS || "משה בוסתני לוי 11, קריית ארבע").trim();
 const BUSINESS_EMAIL = String(process.env.BUSINESS_EMAIL || "").trim();
-const BUSINESS_DESCRIPTION = String(
-  process.env.BUSINESS_DESCRIPTION ||
-    "עמוד זה משמש לקבלת תשלום עבור הזמנות שבוצעו טלפונית או ישירות מול בית העסק."
-).trim();
 
 const receiptsByUniqueId = new Map();
 const receiptsByOrderId = new Map();
@@ -462,10 +458,10 @@ function renderBusinessInfoPage() {
     title: BUSINESS_NAME,
     body: `
       <h1 class="center">${htmlEscape(BUSINESS_NAME)}</h1>
-      <p class="center">${htmlEscape(BUSINESS_DESCRIPTION)}</p>
+      <p class="center">עמוד זה משמש לתשלום עבור הזמנות שבוצעו טלפונית או ישירות מול בית העסק.</p>
 
       <div class="notice">
-        עמוד זה מיועד לתשלום עבור הזמנות שבוצעו טלפונית או ישירות מול בית העסק, ולא לחנות אינטרנטית עם סל קניות.
+        זהו עמוד תשלום להזמנות טלפוניות, ולא חנות אינטרנטית עם סל קניות.
       </div>
 
       <ul class="info-list">
@@ -477,7 +473,7 @@ function renderBusinessInfoPage() {
       </ul>
 
       <p class="small">
-        לבירורים, שינוי הזמנה או בקשת סיוע ניתן ליצור קשר טלפוני עם בית העסק.
+        לבירורים, שינוי הזמנה או בקשת סיוע ניתן ליצור קשר ישירות עם בית העסק.
       </p>
     `
   });
@@ -495,13 +491,13 @@ function renderCancelPolicyPage() {
       </p>
 
       <p>
-        בקשות לביטול עסקה, שינוי הזמנה, החזר או זיכוי ייבדקו ויטופלו בהתאם להוראות כל דין החל על העסקה,
+        בקשות לביטול עסקה, שינוי הזמנה, החזר או זיכוי ייבדקו ויטופלו בהתאם להוראות הדין החל על העסקה,
         סוג המוצר או השירות, ומועד הבקשה ביחס למועד הכנת ההזמנה או מסירתה.
       </p>
 
       <p>
-        בעסקאות המתייחסות להזמנת מזון שהוכנה במיוחד עבור הלקוח או שהכנתה כבר החלה,
-        ייתכנו מגבלות על ביטול או החזר, הכול בכפוף לדין.
+        בעסקאות הנוגעות להזמנת מזון שהוכנה במיוחד עבור הלקוח או שהכנתה כבר החלה,
+        ייתכנו מגבלות על ביטול או החזר, בכפוף לדין.
       </p>
 
       <p>
@@ -587,10 +583,6 @@ function renderSuccess({ receipt, orderIdFromUrl }) {
       ${block("סכום העסקה", amount ? amount + " ₪" : "")}
       ${block("תאריך ושעת העסקה", transactionDateTime)}
       ${block("מספר אישור", approval)}
-
-      <div class="notice">
-        התשלום בוצע עבור הזמנה שבוצעה מול ${htmlEscape(BUSINESS_NAME)}.
-      </div>
     `
   });
 }
@@ -600,7 +592,7 @@ function renderCancelPage() {
     title: "התשלום בוטל",
     body: `
       <h1 class="center">התשלום בוטל</h1>
-      <p class="center">לא בוצע חיוב. ניתן לחזור לבית העסק ולבצע ניסיון נוסף במידת הצורך.</p>
+      <p class="center">לא בוצע חיוב. ניתן לבצע ניסיון נוסף במידת הצורך.</p>
       <div class="notice">
         ליצירת קשר: ${htmlEscape(BUSINESS_PHONE)}
       </div>
