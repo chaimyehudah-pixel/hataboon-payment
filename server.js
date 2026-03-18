@@ -20,6 +20,15 @@ const GOOGLE_SHEET_ID = String(process.env.GOOGLE_SHEET_ID || "").trim();
 
 const SHEET_NAME = "payments";
 
+const BUSINESS_NAME = String(process.env.BUSINESS_NAME || "פיצת הטאבון").trim();
+const BUSINESS_PHONE = String(process.env.BUSINESS_PHONE || "058-6760000").trim();
+const BUSINESS_ADDRESS = String(process.env.BUSINESS_ADDRESS || "משה בוסתני לוי 11, קריית ארבע").trim();
+const BUSINESS_EMAIL = String(process.env.BUSINESS_EMAIL || "").trim();
+const BUSINESS_DESCRIPTION = String(
+  process.env.BUSINESS_DESCRIPTION ||
+    "עמוד זה משמש לקבלת תשלום עבור הזמנות שבוצעו טלפונית או ישירות מול בית העסק."
+).trim();
+
 const receiptsByUniqueId = new Map();
 const receiptsByOrderId = new Map();
 
@@ -126,7 +135,17 @@ function createSheetsClient() {
   return google.sheets({ version: "v4", auth });
 }
 
-async function appendPaidPaymentToSheet({ token, orderId, name, phone, amount, approvalNumber, paymentDate }) {
+async function appendPaidPaymentToSheet({
+  token,
+  orderId,
+  name,
+  phone,
+  amount,
+  approvalNumber,
+  paymentDate
+}) {
+  if (!GOOGLE_SERVICE_ACCOUNT || !GOOGLE_SHEET_ID) return;
+
   const sheets = createSheetsClient();
 
   await sheets.spreadsheets.values.append({
@@ -151,6 +170,7 @@ async function appendPaidPaymentToSheet({ token, orderId, name, phone, amount, a
 async function findPaymentByTokenInSheet(token) {
   const cleanToken = String(token || "").trim();
   if (!cleanToken) return null;
+  if (!GOOGLE_SERVICE_ACCOUNT || !GOOGLE_SHEET_ID) return null;
 
   const sheets = createSheetsClient();
 
@@ -188,17 +208,27 @@ function hasRealApproval(body) {
   return approvalNumber !== "";
 }
 
+function parsePositiveAmount(value) {
+  const normalized = String(value || "").replace(",", ".").trim();
+  const amount = Number(normalized);
+  if (!Number.isFinite(amount) || amount <= 0) return null;
+  return Number(amount.toFixed(2));
+}
+
 async function createZCreditSession({ orderId, amount, name, phone }) {
   const cleanId = cleanOrderId(orderId);
   const customerName = String(name || "").trim();
-  const amountNumber = Number(amount);
+  const amountNumber = parsePositiveAmount(amount);
   const phone972 = normalizePhoneDigits(phone);
   const phoneLocal = normalizePhoneLocal(phone);
 
   if (!cleanId) throw new Error("Invalid orderId");
   if (!customerName) throw new Error("Missing name");
-  if (!Number.isFinite(amountNumber) || amountNumber <= 0) throw new Error("Invalid amount");
+  if (!amountNumber) throw new Error("Invalid amount");
   if (!phone972) throw new Error("Invalid phone");
+  if (!BASE_URL || !ZC_KEY || !ZC_TERMINAL || !ZC_PASSWORD) {
+    throw new Error("Missing payment server configuration");
+  }
 
   const uniqueId = "order-" + cleanId + "-" + Date.now() + "-" + randomId();
 
@@ -254,26 +284,23 @@ async function createZCreditSession({ orderId, amount, name, phone }) {
     }
   );
 
-  const data = await response.json();
+  const data = await response.json().catch(() => ({}));
 
-  if (data?.Data?.SessionUrl) {
+  if (response.ok && data?.Data?.SessionUrl) {
     return data.Data.SessionUrl;
   }
 
-  throw new Error(JSON.stringify(data));
+  throw new Error("ZCredit CreateSession failed: " + JSON.stringify(data));
 }
 
-function renderPaymentPage({ orderId, amount, phone }) {
+function renderLayout({ title, body }) {
   return `
 <!doctype html>
 <html lang="he" dir="rtl">
 <head>
 <meta charset="utf-8">
-<meta
-  name="viewport"
-  content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover"
-/>
-<title>תשלום</title>
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover" />
+<title>${htmlEscape(title)}</title>
 <style>
 html{
   -webkit-text-size-adjust:100%;
@@ -283,35 +310,54 @@ html{
 body{
   font-family:Arial,Helvetica,sans-serif;
   background:#f4f4f4;
-  padding:20px;
+  padding:16px;
   margin:0;
-  overflow-x:hidden;
+  color:#111;
 }
 *{
   box-sizing:border-box;
 }
 .card{
-  max-width:500px;
+  max-width:760px;
   width:100%;
-  margin:auto;
+  margin:18px auto;
   background:#fff;
   border-radius:20px;
-  padding:30px;
-  box-shadow:0 10px 30px rgba(0,0,0,.1);
+  padding:24px;
+  box-shadow:0 10px 30px rgba(0,0,0,.08);
 }
 .logo{
   text-align:center;
-  margin-bottom:20px;
+  margin-bottom:14px;
 }
 .logo img{
-  max-width:200px;
+  max-width:190px;
   width:100%;
   height:auto;
+}
+h1,h2,h3{
+  margin-top:0;
+}
+p{
+  line-height:1.65;
+}
+.info-list{
+  margin:0;
+  padding:0;
+  list-style:none;
+}
+.info-list li{
+  margin:10px 0;
+  padding:12px 14px;
+  background:#fafafa;
+  border:1px solid #eee;
+  border-radius:12px;
 }
 button,
 input,
 select,
-textarea{
+textarea,
+a.btn{
   width:100%;
   padding:12px;
   border-radius:10px;
@@ -323,51 +369,185 @@ textarea{
   -webkit-appearance:none;
   appearance:none;
 }
-button{
+button,
+a.btn.primary{
   border:0;
   background:#c40000;
   color:#fff;
   font-weight:bold;
   cursor:pointer;
-  margin-top:20px;
+  text-decoration:none;
+  display:inline-block;
+  text-align:center;
+}
+a.btn.secondary{
+  background:#fff;
+  color:#111;
+  text-decoration:none;
 }
 label{
   font-weight:bold;
   margin-top:14px;
   display:block;
 }
-h2{
+.notice{
+  background:#fff8e8;
+  border:1px solid #f0d99b;
+  padding:12px 14px;
+  border-radius:12px;
+  margin:14px 0;
+}
+.footer-links{
+  margin-top:18px;
+  padding-top:14px;
+  border-top:1px solid #eee;
+  display:flex;
+  flex-wrap:wrap;
+  gap:10px;
+}
+.footer-links a{
+  color:#0b57d0;
+  text-decoration:none;
+}
+.small{
+  font-size:14px;
+  color:#444;
+}
+.field-block{
+  padding:10px 0 8px;
+  border-bottom:1px solid #eee;
+}
+.field-block:last-child{
+  border-bottom:none;
+}
+.field-label{
+  font-size:13px;
+  font-weight:800;
+  color:#333;
+  margin-bottom:4px;
+}
+.field-value{
+  font-size:18px;
+  font-weight:500;
+  color:#111;
+  word-break:break-word;
+}
+.center{
   text-align:center;
-  margin:0 0 20px;
 }
 </style>
 </head>
 <body>
 <div class="card">
   <div class="logo">
-    <img src="/logo.jpeg" alt="הטאבון">
+    <img src="/logo.jpeg" alt="${htmlEscape(BUSINESS_NAME)}">
   </div>
-
-  <h2>תשלום להזמנה #${htmlEscape(orderId)}</h2>
-
-  <form method="POST" action="/create-session">
-    <input type="hidden" name="orderId" value="${htmlEscape(orderId)}">
-
-    <label>סכום לתשלום</label>
-    <input name="amount" value="${htmlEscape(amount)}" inputmode="decimal" required>
-
-    <label>שם מלא</label>
-    <input name="name" autocomplete="name" required>
-
-    <label>טלפון</label>
-    <input name="phone" value="${htmlEscape(phone)}" inputmode="tel" autocomplete="tel" required>
-
-    <button type="submit">מעבר לתשלום</button>
-  </form>
+  ${body}
+  <div class="footer-links">
+    <a href="/">עמוד העסק</a>
+    <a href="/cancel-policy">מדיניות ביטול</a>
+  </div>
 </div>
 </body>
 </html>
 `;
+}
+
+function renderBusinessInfoPage() {
+  const emailHtml = BUSINESS_EMAIL
+    ? `<li><strong>דוא"ל:</strong> ${htmlEscape(BUSINESS_EMAIL)}</li>`
+    : "";
+
+  return renderLayout({
+    title: BUSINESS_NAME,
+    body: `
+      <h1 class="center">${htmlEscape(BUSINESS_NAME)}</h1>
+      <p class="center">${htmlEscape(BUSINESS_DESCRIPTION)}</p>
+
+      <div class="notice">
+        עמוד זה מיועד לתשלום עבור הזמנות שבוצעו טלפונית או ישירות מול בית העסק, ולא לחנות אינטרנטית עם סל קניות.
+      </div>
+
+      <ul class="info-list">
+        <li><strong>שם העסק:</strong> ${htmlEscape(BUSINESS_NAME)}</li>
+        <li><strong>טלפון:</strong> ${htmlEscape(BUSINESS_PHONE)}</li>
+        <li><strong>כתובת:</strong> ${htmlEscape(BUSINESS_ADDRESS)}</li>
+        ${emailHtml}
+        <li><strong>שירותים/מוצרים:</strong> מכירת מזון והזמנות טלפוניות מבית העסק, לרבות תשלום מרחוק עבור הזמנה קיימת.</li>
+      </ul>
+
+      <p class="small">
+        לבירורים, שינוי הזמנה או בקשת סיוע ניתן ליצור קשר טלפוני עם בית העסק.
+      </p>
+    `
+  });
+}
+
+function renderCancelPolicyPage() {
+  return renderLayout({
+    title: "מדיניות ביטול",
+    body: `
+      <h1 class="center">מדיניות ביטול עסקה</h1>
+
+      <p>
+        ניתן לפנות לבית העסק בכל שאלה, בקשה לשינוי הזמנה או בקשת ביטול בטלפון
+        <strong>${htmlEscape(BUSINESS_PHONE)}</strong>.
+      </p>
+
+      <p>
+        בקשות לביטול עסקה, שינוי הזמנה, החזר או זיכוי ייבדקו ויטופלו בהתאם להוראות כל דין החל על העסקה,
+        סוג המוצר או השירות, ומועד הבקשה ביחס למועד הכנת ההזמנה או מסירתה.
+      </p>
+
+      <p>
+        בעסקאות המתייחסות להזמנת מזון שהוכנה במיוחד עבור הלקוח או שהכנתה כבר החלה,
+        ייתכנו מגבלות על ביטול או החזר, הכול בכפוף לדין.
+      </p>
+
+      <p>
+        במקרה של תקלה, חיוב שגוי או בעיה בהזמנה, יש ליצור קשר עם בית העסק בהקדם האפשרי כדי לאפשר בדיקה וטיפול.
+      </p>
+
+      <p>
+        פרטי העסק: ${htmlEscape(BUSINESS_NAME)}, ${htmlEscape(BUSINESS_ADDRESS)}, טלפון: ${htmlEscape(BUSINESS_PHONE)}.
+      </p>
+    `
+  });
+}
+
+function renderPaymentPage({ orderId, amount, phone }) {
+  return renderLayout({
+    title: "תשלום להזמנה",
+    body: `
+      <h1 class="center">תשלום להזמנה #${htmlEscape(orderId)}</h1>
+
+      <p class="center small">
+        תשלום זה מיועד להזמנה שבוצעה טלפונית או ישירות מול בית העסק.
+      </p>
+
+      <form method="POST" action="/create-session">
+        <input type="hidden" name="orderId" value="${htmlEscape(orderId)}">
+
+        <label>סכום לתשלום</label>
+        <input name="amount" value="${htmlEscape(amount)}" inputmode="decimal" required>
+
+        <label>שם מלא</label>
+        <input name="name" autocomplete="name" required>
+
+        <label>טלפון</label>
+        <input name="phone" value="${htmlEscape(phone)}" inputmode="tel" autocomplete="tel" required>
+
+        <button type="submit">מעבר לתשלום</button>
+      </form>
+
+      <div class="notice">
+        <strong>פרטי העסק:</strong><br>
+        ${htmlEscape(BUSINESS_NAME)}<br>
+        ${htmlEscape(BUSINESS_PHONE)}<br>
+        ${htmlEscape(BUSINESS_ADDRESS)}
+      </div>
+    `
+  });
 }
 
 function renderSuccess({ receipt, orderIdFromUrl }) {
@@ -388,118 +568,44 @@ function renderSuccess({ receipt, orderIdFromUrl }) {
   function block(label, value) {
     if (!value || String(value).trim() === "") return "";
     return `
-<div class="field-block">
-  <div class="field-label">${htmlEscape(label)}</div>
-  <div class="field-value">${htmlEscape(value)}</div>
-</div>
-`;
+      <div class="field-block">
+        <div class="field-label">${htmlEscape(label)}</div>
+        <div class="field-value">${htmlEscape(value)}</div>
+      </div>
+    `;
   }
 
-  return `
-<!doctype html>
-<html lang="he" dir="rtl">
-<head>
-<meta charset="utf-8">
-<meta
-  name="viewport"
-  content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover"
-/>
-<title>אישור תשלום</title>
-<style>
-html{
-  -webkit-text-size-adjust:100%;
-  text-size-adjust:100%;
-  overflow-x:hidden;
-}
-body{
-  font-family:Arial,Helvetica,sans-serif;
-  background:#f4f4f4;
-  padding:14px;
-  margin:0;
-  overflow-x:hidden;
-}
-*{
-  box-sizing:border-box;
-}
-.card{
-  max-width:500px;
-  width:100%;
-  margin:18px auto;
-  background:#fff;
-  border-radius:20px;
-  padding:18px 18px;
-  box-shadow:0 8px 22px rgba(0,0,0,.08);
-  text-align:center;
-}
-.logo{
-  margin-bottom:6px;
-}
-.logo img{
-  max-width:180px;
-  width:100%;
-  height:auto;
-}
-.title{
-  font-size:24px;
-  font-weight:900;
-  margin:4px 0 4px;
-}
-.ok{
-  font-size:16px;
-  color:#1a7f37;
-  margin-bottom:12px;
-  font-weight:800;
-}
-.fields{
-  margin-top:4px;
-}
-.field-block{
-  padding:10px 0 8px;
-  border-bottom:1px solid #eee;
-}
-.field-block:last-child{
-  border-bottom:none;
-}
-.field-label{
-  font-size:13px;
-  font-weight:800;
-  color:#333;
-  margin-bottom:4px;
-  text-align:center;
-  line-height:1.2;
-}
-.field-value{
-  font-size:18px;
-  font-weight:500;
-  color:#111;
-  text-align:center;
-  direction:rtl;
-  word-break:break-word;
-  line-height:1.15;
-}
-</style>
-</head>
-<body>
-<div class="card">
-  <div class="logo">
-    <img src="/logo.jpeg" alt="הטאבון">
-  </div>
+  return renderLayout({
+    title: "אישור תשלום",
+    body: `
+      <h1 class="center">אישור תשלום</h1>
+      <p class="center" style="color:#1a7f37;font-weight:800;">התשלום עבר בהצלחה ✅</p>
 
-  <div class="title">אישור תשלום</div>
-  <div class="ok">התשלום עבר בהצלחה ✅</div>
+      ${block("שם המשלם", customerName)}
+      ${block("מספר הזמנה", effectiveOrderId)}
+      ${block("טלפון", phone)}
+      ${block("סכום העסקה", amount ? amount + " ₪" : "")}
+      ${block("תאריך ושעת העסקה", transactionDateTime)}
+      ${block("מספר אישור", approval)}
 
-  <div class="fields">
-    ${block("שם המשלם", customerName)}
-    ${block("מספר הזמנה", effectiveOrderId)}
-    ${block("טלפון", phone)}
-    ${block("סכום העסקה", amount ? amount + " ₪" : "")}
-    ${block("תאריך ושעת העסקה", transactionDateTime)}
-    ${block("מספר אישור", approval)}
-  </div>
-</div>
-</body>
-</html>
-`;
+      <div class="notice">
+        התשלום בוצע עבור הזמנה שבוצעה מול ${htmlEscape(BUSINESS_NAME)}.
+      </div>
+    `
+  });
+}
+
+function renderCancelPage() {
+  return renderLayout({
+    title: "התשלום בוטל",
+    body: `
+      <h1 class="center">התשלום בוטל</h1>
+      <p class="center">לא בוצע חיוב. ניתן לחזור לבית העסק ולבצע ניסיון נוסף במידת הצורך.</p>
+      <div class="notice">
+        ליצירת קשר: ${htmlEscape(BUSINESS_PHONE)}
+      </div>
+    `
+  });
 }
 
 async function handleZcCallback(req, res) {
@@ -549,7 +655,19 @@ async function handleZcCallback(req, res) {
 }
 
 app.get("/", (req, res) => {
-  res.send("Hataboon Payment Server Running 🍕");
+  res.send(renderBusinessInfoPage());
+});
+
+app.get("/business-info", (req, res) => {
+  res.send(renderBusinessInfoPage());
+});
+
+app.get("/cancel-policy", (req, res) => {
+  res.send(renderCancelPolicyPage());
+});
+
+app.get("/health", (req, res) => {
+  res.json({ ok: true });
 });
 
 app.get("/pay/:phone/:orderId/:amount", (req, res) => {
@@ -557,12 +675,20 @@ app.get("/pay/:phone/:orderId/:amount", (req, res) => {
   const orderId = cleanOrderId(req.params.orderId);
   const amount = req.params.amount;
 
+  if (!orderId) {
+    return res.status(400).send("מספר הזמנה לא תקין");
+  }
+
   res.send(renderPaymentPage({ orderId, amount, phone }));
 });
 
 app.get("/pay/:orderId/:amount", (req, res) => {
   const orderId = cleanOrderId(req.params.orderId);
   const amount = req.params.amount;
+
+  if (!orderId) {
+    return res.status(400).send("מספר הזמנה לא תקין");
+  }
 
   res.send(renderPaymentPage({ orderId, amount, phone: "" }));
 });
@@ -581,7 +707,7 @@ app.post("/create-session", async (req, res) => {
     res.redirect(sessionUrl);
   } catch (err) {
     console.error(err);
-    res.send("שגיאה ביצירת תשלום");
+    res.status(500).send("שגיאה ביצירת תשלום");
   }
 });
 
@@ -618,12 +744,12 @@ app.get("/payment-success", async (req, res) => {
     res.send(renderSuccess({ receipt, orderIdFromUrl }));
   } catch (err) {
     console.error("payment-success error:", err);
-    res.send("שגיאה בהצגת אישור התשלום");
+    res.status(500).send("שגיאה בהצגת אישור התשלום");
   }
 });
 
 app.get("/payment-cancel", (req, res) => {
-  res.send("התשלום בוטל");
+  res.send(renderCancelPage());
 });
 
 app.listen(PORT, () => {
