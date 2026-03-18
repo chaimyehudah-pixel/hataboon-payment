@@ -31,6 +31,7 @@ const BUSINESS_CANCEL_EXT_1 = "4";
 const BUSINESS_CANCEL_EXT_2 = "7";
 const BUSINESS_WHATSAPP_URL = "https://wa.me/972524150000";
 const BUSINESS_WHATSAPP_DISPLAY = "052-415-0000";
+const PAYMENT_ENTRY_URL = "https://hataboon-payment-production.up.railway.app/pay/0/0";
 
 const receiptsByUniqueId = new Map();
 const receiptsByOrderId = new Map();
@@ -360,7 +361,7 @@ body{
   font-size:14px;
   color:#3f2f11;
   margin:-6px auto 8px;
-  max-width:360px;
+  max-width:430px;
   border-top:2px solid #ead9b2;
   border-bottom:2px solid #ead9b2;
   padding:2px 8px;
@@ -438,21 +439,18 @@ a.btn.primary{
   background:#d41108;
   color:#fff;
 }
-a.btn.green{
-  border:0;
-  background:#1f8f4e;
-  color:#fff;
-}
 .footer-links{
   display:flex;
   justify-content:flex-end;
   gap:16px;
   margin-top:22px;
   font-size:15px;
+  flex-wrap:wrap;
 }
 .footer-links a{
   color:#2b55d4;
   text-decoration:none;
+  font-weight:700;
 }
 .small-center{
   text-align:center;
@@ -485,10 +483,6 @@ a.btn.green{
   font-size:20px;
   font-weight:800;
   margin:6px 0 18px;
-}
-a.inline-link{
-  color:#2b55d4;
-  text-decoration:none;
 }
 @media (max-width: 640px){
   body{
@@ -559,7 +553,7 @@ function renderBusinessInfoPage() {
       </ul>
 
       <div class="notice">
-        <strong>הנהלת חשבונות ובדיקת חיובים</strong><br>
+        <strong>הנהלת חשבונות</strong><br>
         יש לשלוח צילום מסך לוואטסאפ: ${renderWhatsAppLink()}
       </div>
 
@@ -570,8 +564,8 @@ function renderBusinessInfoPage() {
 
       <div class="footer-links">
         <a href="/">עמוד העסק</a>
-        <a href="/cancel-policy">מדיניות ביטול</a>
-        <a href="/pay/1234/89" style="font-weight:700;color:#111;">מעבר לתשלום</a>
+        <a href="/cancel-policy">מדיניות ביטולים וברורים כספיים</a>
+        <a href="${PAYMENT_ENTRY_URL}">מעבר לתשלום</a>
       </div>
     `
   });
@@ -579,10 +573,10 @@ function renderBusinessInfoPage() {
 
 function renderCancelPolicyPage() {
   return renderLayout({
-    title: "מדיניות ביטול עסקה",
+    title: "מדיניות ביטולים וברורים כספיים",
     body: `
       ${renderHeaderMini()}
-      <h1>מדיניות ביטול עסקה</h1>
+      <h1>מדיניות ביטולים וברורים כספיים</h1>
 
       <p style="font-size:18px; line-height:1.8; text-align:right;">
         לבקשת ביטול, שינוי הזמנה או בירור, יש להתקשר ל<strong>${htmlEscape(BUSINESS_CANCEL_PHONE)}</strong> שלוחה <strong>${htmlEscape(BUSINESS_CANCEL_EXT_1)}</strong>.
@@ -610,8 +604,7 @@ function renderCancelPolicyPage() {
 
       <div class="footer-links">
         <a href="/">עמוד העסק</a>
-        <a href="/cancel-policy">מדיניות ביטול</a>
-        <a href="/pay/1234/89" style="font-weight:700;color:#111;">מעבר לתשלום</a>
+        <a href="${PAYMENT_ENTRY_URL}">מעבר לתשלום</a>
       </div>
     `
   });
@@ -644,7 +637,7 @@ function renderPaymentPage({ orderId, amount, phone }) {
 
       <div class="footer-links">
         <a href="/">עמוד העסק</a>
-        <a href="/cancel-policy">מדיניות ביטול</a>
+        <a href="/cancel-policy">מדיניות ביטולים וברורים כספיים</a>
       </div>
     `
   });
@@ -693,8 +686,8 @@ function renderSuccess({ receipt, orderIdFromUrl }) {
 
       <div class="footer-links">
         <a href="/">עמוד העסק</a>
-        <a href="/cancel-policy">מדיניות ביטול</a>
-        <a href="/pay/1234/89" style="font-weight:700;color:#111;">מעבר לתשלום</a>
+        <a href="/cancel-policy">מדיניות ביטולים וברורים כספיים</a>
+        <a href="${PAYMENT_ENTRY_URL}">מעבר לתשלום</a>
       </div>
     `
   });
@@ -715,8 +708,8 @@ function renderCancelPage() {
 
       <div class="footer-links">
         <a href="/">עמוד העסק</a>
-        <a href="/cancel-policy">מדיניות ביטול</a>
-        <a href="/pay/1234/89" style="font-weight:700;color:#111;">מעבר לתשלום</a>
+        <a href="/cancel-policy">מדיניות ביטולים וברורים כספיים</a>
+        <a href="${PAYMENT_ENTRY_URL}">מעבר לתשלום</a>
       </div>
     `
   });
@@ -789,22 +782,22 @@ app.get("/pay/:phone/:orderId/:amount", (req, res) => {
   const orderId = cleanOrderId(req.params.orderId);
   const amount = req.params.amount;
 
-  if (!orderId) {
+  if (!orderId && orderId !== "0") {
     return res.status(400).send("מספר הזמנה לא תקין");
   }
 
-  res.send(renderPaymentPage({ orderId, amount, phone }));
+  res.send(renderPaymentPage({ orderId: orderId || "0", amount, phone }));
 });
 
 app.get("/pay/:orderId/:amount", (req, res) => {
   const orderId = cleanOrderId(req.params.orderId);
   const amount = req.params.amount;
 
-  if (!orderId) {
+  if (!orderId && orderId !== "0") {
     return res.status(400).send("מספר הזמנה לא תקין");
   }
 
-  res.send(renderPaymentPage({ orderId, amount, phone: "" }));
+  res.send(renderPaymentPage({ orderId: orderId || "0", amount, phone: "" }));
 });
 
 app.post("/create-session", async (req, res) => {
