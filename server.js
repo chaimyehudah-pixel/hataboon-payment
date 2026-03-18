@@ -604,7 +604,6 @@ function renderCancelPolicyPage() {
 
       <div class="footer-links">
         <a href="/">עמוד העסק</a>
-        <a href="${PAYMENT_ENTRY_URL}">מעבר לתשלום</a>
       </div>
     `
   });
@@ -679,10 +678,6 @@ function renderSuccess({ receipt, orderIdFromUrl }) {
       ${block("סכום העסקה", amount ? amount + " ₪" : "")}
       ${block("תאריך ושעת העסקה", transactionDateTime)}
       ${block("מספר אישור", approval)}
-
-      <div class="notice">
-        אם נראה שבוצע חיוב כפול, יש לשלוח צילום מסך לוואטסאפ: ${renderWhatsAppLink()}
-      </div>
 
       <div class="footer-links">
         <a href="/">עמוד העסק</a>
