@@ -77,10 +77,6 @@ function normalizePhoneLocal(phoneRaw) {
   return d.slice(0, 10);
 }
 
-function pad2(v) {
-  return String(v).padStart(2, "0");
-}
-
 function formatIsraelDateTimeParts(dateValue) {
   const d = dateValue instanceof Date ? dateValue : new Date(dateValue);
   if (Number.isNaN(d.getTime())) {
@@ -183,7 +179,7 @@ async function getNextReceiptSerial() {
 
   const response = await sheets.spreadsheets.values.get({
     spreadsheetId: GOOGLE_SHEET_ID,
-    range: `${SHEET_NAME}!A:I`
+    range: `${SHEET_NAME}!A:J`
   });
 
   const rows = response.data.values || [];
@@ -678,7 +674,8 @@ a.btn.secondary{
 `;
 }
 
-function renderHeaderMini(dateValue = new Date()) {
+function renderHeaderMini(options = {}) {
+  const { showDateTime = false, dateValue = new Date() } = options;
   const dt = formatIsraelDateTimeParts(dateValue);
 
   return `
@@ -687,8 +684,8 @@ function renderHeaderMini(dateValue = new Date()) {
       <div class="top-mini-right">
         <span class="mini-line">${htmlEscape(BUSINESS_NAME)}</span>
         <span class="mini-line nowrap-text">${htmlEscape(BUSINESS_PHONE_DISPLAY)}</span>
-        <span class="mini-time">${htmlEscape(dt.time)}</span>
-        <span class="mini-date">${htmlEscape(dt.date)}</span>
+        ${showDateTime ? `<span class="mini-time">${htmlEscape(dt.time)}</span>` : ""}
+        ${showDateTime ? `<span class="mini-date">${htmlEscape(dt.date)}</span>` : ""}
       </div>
     </div>
     <div class="logo">
@@ -842,7 +839,10 @@ function renderSuccess({ receipt, orderIdFromUrl }) {
   return renderLayout({
     title: "קבלה / אישור תשלום",
     body: `
-      ${renderHeaderMini(transactionDateTime || new Date())}
+      ${renderHeaderMini({
+        showDateTime: true,
+        dateValue: transactionDateTime || new Date()
+      })}
       <h1>קבלה / אישור תשלום</h1>
       <div class="success-title">התשלום עבר בהצלחה ✅</div>
       <div class="receipt-subtitle">קבלה</div>
