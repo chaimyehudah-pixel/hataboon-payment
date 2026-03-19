@@ -583,18 +583,11 @@ a.btn.secondary{
   font-weight:800;
   margin:6px 0 10px;
 }
-.receipt-subtitle{
-  text-align:center;
-  font-size:18px;
-  font-weight:700;
-  color:#222;
-  margin:0 0 4px;
-}
 .receipt-id{
   text-align:center;
   font-size:15px;
   color:#555;
-  margin:0 0 4px;
+  margin:0 0 14px;
 }
 .receipt-serial{
   text-align:center;
@@ -684,8 +677,8 @@ function renderHeaderMini(options = {}) {
       <div class="top-mini-right">
         <span class="mini-line">${htmlEscape(BUSINESS_NAME)}</span>
         <span class="mini-line nowrap-text">${htmlEscape(BUSINESS_PHONE_DISPLAY)}</span>
-        ${showDateTime ? `<span class="mini-time">${htmlEscape(dt.time)}</span>` : ""}
         ${showDateTime ? `<span class="mini-date">${htmlEscape(dt.date)}</span>` : ""}
+        ${showDateTime ? `<span class="mini-time">${htmlEscape(dt.time)}</span>` : ""}
       </div>
     </div>
     <div class="logo">
@@ -837,15 +830,14 @@ function renderSuccess({ receipt, orderIdFromUrl }) {
   }
 
   return renderLayout({
-    title: "קבלה / אישור תשלום",
+    title: "אישור תשלום",
     body: `
       ${renderHeaderMini({
         showDateTime: true,
         dateValue: transactionDateTime || new Date()
       })}
-      <h1>קבלה / אישור תשלום</h1>
+      <h1>אישור תשלום</h1>
       <div class="success-title">התשלום עבר בהצלחה ✅</div>
-      <div class="receipt-subtitle">קבלה</div>
       <div class="receipt-id">${htmlEscape(BUSINESS_ID_LABEL)}</div>
       ${receiptSerial ? `<div class="receipt-serial">מספר קבלה: ${htmlEscape(receiptSerial)}</div>` : ""}
 
@@ -853,8 +845,6 @@ function renderSuccess({ receipt, orderIdFromUrl }) {
       ${block("תשלום עבור הזמנה:", effectiveOrderId)}
       ${block("טלפון:", phone, "nowrap-text")}
       ${block("סכום העסקה:", amount ? amount + " ₪" : "")}
-      ${block("תאריך ושעת העסקה:", transactionDateTime)}
-      ${block("מספר אישור:", approval)}
       ${block("מספר אישור מחברת האשראי:", approval)}
       ${block("4 ספרות אחרונות של אמצעי התשלום:", paymentLast4, "nowrap-text")}
 
