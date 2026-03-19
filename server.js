@@ -655,7 +655,10 @@ a.btn.secondary{
 }
 .print-btn{
   width:100%;
-  display:block;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  gap:8px;
   text-align:center;
   text-decoration:none;
   border-radius:16px;
@@ -667,6 +670,12 @@ a.btn.secondary{
   border:0;
   background:#4159d1;
   color:#fff;
+}
+.share-icon{
+  width:18px;
+  height:18px;
+  display:inline-block;
+  flex:0 0 auto;
 }
 .nowrap-text{
   white-space:nowrap;
@@ -968,7 +977,13 @@ function renderSuccess({ receipt, orderIdFromUrl }) {
         ${block("4 ספרות אחרונות של אמצעי התשלום:", paymentLast4, "nowrap-text")}
 
         <button type="button" class="print-btn" onclick="window.print()">הורדת אישור PDF</button>
-        <button type="button" class="print-btn" onclick="shareCurrentPage()">שיתוף כתובת דף האינטרנט</button>
+        <button type="button" class="print-btn" onclick="shareCurrentPage()">
+          <svg class="share-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <path d="M14 3L21 10L14 17" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+            <path d="M21 10H10C6.68629 10 4 12.6863 4 16V21" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+          <span>שיתוף</span>
+        </button>
 
         <div class="footer-buttons">
           <a class="btn secondary" href="/">עמוד העסק</a>
