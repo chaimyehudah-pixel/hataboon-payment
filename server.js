@@ -724,6 +724,37 @@ a.btn.secondary{
   }
 }
 </style>
+<script>
+async function shareCurrentPage() {
+  const url = window.location.href;
+
+  try {
+    if (navigator.share) {
+      await navigator.share({
+        title: document.title || "קישור לדף",
+        url
+      });
+      return;
+    }
+
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      await navigator.clipboard.writeText(url);
+      alert("כתובת הדף הועתקה ללוח");
+      return;
+    }
+
+    const tempInput = document.createElement("input");
+    tempInput.value = url;
+    document.body.appendChild(tempInput);
+    tempInput.select();
+    document.execCommand("copy");
+    document.body.removeChild(tempInput);
+    alert("כתובת הדף הועתקה ללוח");
+  } catch (err) {
+    alert("לא ניתן היה לשתף את כתובת הדף");
+  }
+}
+</script>
 </head>
 <body>
 <div class="card">
@@ -937,6 +968,7 @@ function renderSuccess({ receipt, orderIdFromUrl }) {
         ${block("4 ספרות אחרונות של אמצעי התשלום:", paymentLast4, "nowrap-text")}
 
         <button type="button" class="print-btn" onclick="window.print()">הורדת אישור PDF</button>
+        <button type="button" class="print-btn" onclick="shareCurrentPage()">שיתוף כתובת דף האינטרנט</button>
 
         <div class="footer-buttons">
           <a class="btn secondary" href="/">עמוד העסק</a>
