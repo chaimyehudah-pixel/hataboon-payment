@@ -21,12 +21,10 @@ const GOOGLE_SHEET_ID = String(process.env.GOOGLE_SHEET_ID || "").trim();
 const SHEET_NAME = "payments";
 
 const BUSINESS_NAME = "פיצת הטאבון";
-const BUSINESS_PHONE = "029605556";
 const BUSINESS_PHONE_DISPLAY = "029605556";
 const BUSINESS_ADDRESS = "א.התעשייה קריית-ארבע - חברון";
 const BUSINESS_STREET = "רחוב משה בוסאני לוי 11";
 const BUSINESS_FULL_ADDRESS = `${BUSINESS_ADDRESS}, ${BUSINESS_STREET}`;
-const BUSINESS_CANCEL_PHONE = "029605556";
 const BUSINESS_CANCEL_PHONE_DISPLAY = "029605556";
 const BUSINESS_CANCEL_EXT_1 = "4";
 const BUSINESS_CANCEL_EXT_2 = "7";
@@ -44,7 +42,7 @@ function cleanOrderId(v) {
   return String(v || "").replace(/\D/g, "");
 }
 
-function cleanPhone(v) {
+function cleanDigits(v) {
   return String(v || "").replace(/[^\d]/g, "");
 }
 
@@ -61,7 +59,7 @@ function randomId() {
 }
 
 function normalizePhoneDigits(phoneRaw) {
-  let d = cleanPhone(phoneRaw);
+  let d = cleanDigits(phoneRaw);
   if (!d) return "";
   if (d.startsWith("00972")) d = d.slice(2);
   if (d.startsWith("0") && d.length === 10) d = "972" + d.slice(1);
@@ -69,7 +67,7 @@ function normalizePhoneDigits(phoneRaw) {
 }
 
 function normalizePhoneLocal(phoneRaw) {
-  let d = cleanPhone(phoneRaw);
+  let d = cleanDigits(phoneRaw);
   if (!d) return "";
   if (d.startsWith("00972")) d = d.slice(2);
   if (d.startsWith("972") && d.length >= 12) return "0" + d.slice(3, 12);
@@ -81,11 +79,7 @@ function parseStoredIsraelDateTime(value) {
   const s = String(value || "").trim();
   const m = s.match(/^(\d{2})\.(\d{2})\.(\d{4}),\s*(\d{2}):(\d{2}):(\d{2})$/);
   if (!m) {
-    return {
-      date: "",
-      time: "",
-      combined: ""
-    };
+    return { date: "", time: "", combined: "" };
   }
 
   const [, day, month, year, hour, minute, second] = m;
@@ -105,11 +99,7 @@ function formatIsraelDateTimeParts(dateValue) {
 
   const d = dateValue instanceof Date ? dateValue : new Date(dateValue);
   if (Number.isNaN(d.getTime())) {
-    return {
-      date: "",
-      time: "",
-      combined: ""
-    };
+    return { date: "", time: "", combined: "" };
   }
 
   const formatter = new Intl.DateTimeFormat("en-GB", {
@@ -154,13 +144,8 @@ function saveReceipt(uniqueId, orderId, receipt) {
     orderId: finalOrderId
   };
 
-  if (finalUniqueId) {
-    receiptsByUniqueId.set(finalUniqueId, rec);
-  }
-
-  if (finalOrderId) {
-    receiptsByOrderId.set(finalOrderId, rec);
-  }
+  if (finalUniqueId) receiptsByUniqueId.set(finalUniqueId, rec);
+  if (finalOrderId) receiptsByOrderId.set(finalOrderId, rec);
 }
 
 function getReceipt(uniqueId, orderId) {
@@ -201,7 +186,6 @@ async function getNextReceiptSerial() {
   }
 
   const sheets = createSheetsClient();
-
   const response = await sheets.spreadsheets.values.get({
     spreadsheetId: GOOGLE_SHEET_ID,
     range: `${SHEET_NAME}!A:J`
@@ -298,8 +282,7 @@ async function findPaymentByTokenInSheet(token) {
 }
 
 function hasRealApproval(body) {
-  const approvalNumber = String(body?.ApprovalNumber || "").trim();
-  return approvalNumber !== "";
+  return String(body?.ApprovalNumber || "").trim() !== "";
 }
 
 function parsePositiveAmount(value) {
@@ -329,7 +312,7 @@ function extractPaymentLast4(body) {
   ];
 
   for (const value of candidates) {
-    const digits = cleanPhone(String(value || ""));
+    const digits = cleanDigits(String(value || ""));
     if (digits.length >= 4) {
       return digits.slice(-4);
     }
@@ -435,8 +418,8 @@ html{
 body{
   font-family:Arial,Helvetica,sans-serif;
   background:#efefef;
-  padding:18px;
   margin:0;
+  padding:18px;
   color:#111;
 }
 *{
@@ -446,23 +429,26 @@ body{
   max-width:760px;
   width:100%;
   margin:0 auto;
-  background:#f8f8f8;
-  border-radius:30px;
-  padding:18px 24px 28px;
-  box-shadow:0 0 0 1px rgba(175,137,79,0.12) inset;
+  background:#f7f7f7;
+  border-radius:34px;
+  padding:22px 22px 28px;
+  box-shadow:0 0 0 1px rgba(175,137,79,0.10) inset;
 }
-.top-mini{
-  display:flex;
-  justify-content:space-between;
-  align-items:flex-start;
-  min-height:52px;
-  margin-bottom:4px;
+.top-area{
+  position:relative;
+  min-height:140px;
+  margin-bottom:8px;
 }
 .top-mini-right{
+  position:absolute;
+  top:8px;
+  right:auto;
+  left:0;
   text-align:right;
-  color:#6a4e1d;
+  color:#7b5d2b;
   font-size:14px;
-  line-height:1.25;
+  line-height:1.2;
+  width:130px;
 }
 .top-mini-right .mini-line{
   display:block;
@@ -476,7 +462,7 @@ body{
 }
 .logo{
   text-align:center;
-  margin:0 0 8px;
+  margin:0 auto 6px;
 }
 .logo img{
   max-width:230px;
@@ -486,12 +472,12 @@ body{
 .address-line{
   text-align:center;
   font-size:14px;
-  color:#3f2f11;
-  margin:-6px auto 8px;
-  max-width:430px;
-  border-top:2px solid #ead9b2;
-  border-bottom:2px solid #ead9b2;
-  padding:2px 8px;
+  color:#5b4822;
+  margin:0 auto 0;
+  max-width:520px;
+  border-top:2px solid #e4d1a0;
+  border-bottom:2px solid #e4d1a0;
+  padding:3px 8px;
 }
 h1{
   margin:0 0 8px;
@@ -553,8 +539,8 @@ a.btn{
   display:inline-block;
   text-align:center;
   text-decoration:none;
-  border-radius:14px;
-  padding:15px 18px;
+  border-radius:16px;
+  padding:16px 18px;
   font-size:16px;
   font-weight:700;
   margin-top:16px;
@@ -568,14 +554,14 @@ a.btn.primary{
 }
 a.btn.secondary{
   border:0;
-  background:#2b55d4;
+  background:#4159d1;
   color:#fff;
 }
 .footer-buttons{
   display:flex;
   flex-direction:column;
-  gap:12px;
-  margin-top:22px;
+  gap:14px;
+  margin-top:24px;
 }
 .small-center{
   text-align:center;
@@ -584,11 +570,8 @@ a.btn.secondary{
   margin:6px 0 0;
 }
 .field-block{
-  padding:12px 0;
-  border-bottom:1px solid #e5e5e5;
-}
-.field-block:last-child{
-  border-bottom:none;
+  padding:14px 0 12px;
+  border-top:1px solid #e2e2e2;
 }
 .field-label{
   font-size:14px;
@@ -597,28 +580,42 @@ a.btn.secondary{
   font-weight:700;
 }
 .field-value{
-  font-size:22px;
+  font-size:18px;
   font-weight:700;
   color:#111;
 }
+.receipt-wrap{
+  max-width:700px;
+  margin:0 auto;
+}
+.receipt-header{
+  text-align:center;
+  margin:10px 0 26px;
+}
+.receipt-title{
+  font-size:28px;
+  font-weight:800;
+  color:#111;
+  margin:0 0 8px;
+}
 .success-title{
   text-align:center;
-  color:#1a7f37;
-  font-size:20px;
+  color:#5a9c55;
+  font-size:18px;
   font-weight:800;
-  margin:6px 0 10px;
+  margin:0 0 10px;
 }
 .receipt-id{
   text-align:center;
   font-size:15px;
   color:#555;
-  margin:0 0 14px;
+  margin:0 0 8px;
 }
 .receipt-serial{
   text-align:center;
   font-size:16px;
   color:#333;
-  margin:0 0 20px;
+  margin:0 0 24px;
   font-weight:700;
 }
 .print-btn{
@@ -626,14 +623,14 @@ a.btn.secondary{
   display:block;
   text-align:center;
   text-decoration:none;
-  border-radius:14px;
-  padding:15px 18px;
+  border-radius:16px;
+  padding:16px 18px;
   font-size:16px;
   font-weight:700;
-  margin-top:16px;
+  margin-top:18px;
   cursor:pointer;
   border:0;
-  background:#2b55d4;
+  background:#4159d1;
   color:#fff;
 }
 .nowrap-text{
@@ -668,17 +665,26 @@ a.btn.secondary{
     padding:10px;
   }
   .card{
-    padding:14px 14px 22px;
-    border-radius:24px;
+    padding:16px 14px 22px;
+    border-radius:28px;
   }
-  h1{
+  .top-area{
+    min-height:125px;
+  }
+  .top-mini-right{
+    width:110px;
+    font-size:13px;
+  }
+  h1,
+  .receipt-title{
     font-size:24px;
   }
   .logo img{
-    max-width:190px;
+    max-width:180px;
   }
   .address-line{
     font-size:13px;
+    max-width:100%;
   }
 }
 </style>
@@ -697,20 +703,19 @@ function renderHeaderMini(options = {}) {
   const dt = formatIsraelDateTimeParts(dateValue);
 
   return `
-    <div class="top-mini">
-      <div></div>
+    <div class="top-area">
       <div class="top-mini-right">
         <span class="mini-line">${htmlEscape(BUSINESS_NAME)}</span>
         <span class="mini-line nowrap-text">${htmlEscape(BUSINESS_PHONE_DISPLAY)}</span>
         ${showDateTime && dt.date ? `<span class="mini-date">${htmlEscape(dt.date)}</span>` : ""}
         ${showDateTime && dt.time ? `<span class="mini-time">${htmlEscape(dt.time)}</span>` : ""}
       </div>
-    </div>
-    <div class="logo">
-      <img src="/logo.jpeg" alt="${htmlEscape(BUSINESS_NAME)}">
-    </div>
-    <div class="address-line">
-      ${htmlEscape(BUSINESS_STREET)} &nbsp;&nbsp; ${htmlEscape(BUSINESS_ADDRESS)}
+      <div class="logo">
+        <img src="/logo.jpeg" alt="${htmlEscape(BUSINESS_NAME)}">
+      </div>
+      <div class="address-line">
+        ${htmlEscape(BUSINESS_STREET)} &nbsp;&nbsp; ${htmlEscape(BUSINESS_ADDRESS)}
+      </div>
     </div>
   `;
 }
@@ -861,23 +866,28 @@ function renderSuccess({ receipt, orderIdFromUrl }) {
         showDateTime: true,
         dateValue: transactionDateTime || new Date()
       })}
-      <h1>אישור תשלום</h1>
-      <div class="success-title">התשלום עבר בהצלחה ✅</div>
-      <div class="receipt-id">${htmlEscape(BUSINESS_ID_LABEL)}</div>
-      ${receiptSerial ? `<div class="receipt-serial">מספר קבלה: ${htmlEscape(receiptSerial)}</div>` : ""}
 
-      ${block("לכבוד:", customerName)}
-      ${block("תשלום עבור הזמנה:", effectiveOrderId)}
-      ${block("טלפון:", phone, "nowrap-text")}
-      ${block("סכום העסקה:", amount ? amount + " ₪" : "")}
-      ${block("מספר אישור מחברת האשראי:", approval)}
-      ${block("4 ספרות אחרונות של אמצעי התשלום:", paymentLast4, "nowrap-text")}
+      <div class="receipt-wrap">
+        <div class="receipt-header">
+          <div class="receipt-title">אישור תשלום</div>
+          <div class="success-title">✅ התשלום עבר בהצלחה</div>
+          <div class="receipt-id">${htmlEscape(BUSINESS_ID_LABEL)}</div>
+          ${receiptSerial ? `<div class="receipt-serial">מספר קבלה: ${htmlEscape(receiptSerial)}</div>` : ""}
+        </div>
 
-      <button type="button" class="print-btn" onclick="window.print()">הורדת אישור PDF</button>
+        ${block("לכבוד:", customerName)}
+        ${block("טלפון:", phone, "nowrap-text")}
+        ${block("תשלום עבור הזמנה:", effectiveOrderId)}
+        ${block("סכום העסקה:", amount ? amount + " ₪" : "")}
+        ${block("מספר אישור מחברת האשראי:", approval)}
+        ${block("4 ספרות אחרונות של אמצעי התשלום:", paymentLast4, "nowrap-text")}
 
-      <div class="footer-buttons">
-        <a class="btn secondary" href="/">עמוד העסק</a>
-        <a class="btn secondary" href="/cancel-policy">מדיניות ביטולים וברורים כספיים</a>
+        <button type="button" class="print-btn" onclick="window.print()">הורדת אישור PDF</button>
+
+        <div class="footer-buttons">
+          <a class="btn secondary" href="/">עמוד העסק</a>
+          <a class="btn secondary" href="/cancel-policy">מדיניות ביטולים וברורים כספיים</a>
+        </div>
       </div>
     `
   });
