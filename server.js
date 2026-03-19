@@ -77,7 +77,32 @@ function normalizePhoneLocal(phoneRaw) {
   return d.slice(0, 10);
 }
 
+function parseStoredIsraelDateTime(value) {
+  const s = String(value || "").trim();
+  const m = s.match(/^(\d{2})\.(\d{2})\.(\d{4}),\s*(\d{2}):(\d{2}):(\d{2})$/);
+  if (!m) {
+    return {
+      date: "",
+      time: "",
+      combined: ""
+    };
+  }
+
+  const [, day, month, year, hour, minute, second] = m;
+
+  return {
+    date: `${day}.${month}.${year}`,
+    time: `${hour}:${minute}:${second}`,
+    combined: `${day}.${month}.${year}, ${hour}:${minute}:${second}`
+  };
+}
+
 function formatIsraelDateTimeParts(dateValue) {
+  if (typeof dateValue === "string") {
+    const parsed = parseStoredIsraelDateTime(dateValue);
+    if (parsed.combined) return parsed;
+  }
+
   const d = dateValue instanceof Date ? dateValue : new Date(dateValue);
   if (Number.isNaN(d.getTime())) {
     return {
@@ -677,8 +702,8 @@ function renderHeaderMini(options = {}) {
       <div class="top-mini-right">
         <span class="mini-line">${htmlEscape(BUSINESS_NAME)}</span>
         <span class="mini-line nowrap-text">${htmlEscape(BUSINESS_PHONE_DISPLAY)}</span>
-        ${showDateTime ? `<span class="mini-date">${htmlEscape(dt.date)}</span>` : ""}
-        ${showDateTime ? `<span class="mini-time">${htmlEscape(dt.time)}</span>` : ""}
+        ${showDateTime && dt.date ? `<span class="mini-date">${htmlEscape(dt.date)}</span>` : ""}
+        ${showDateTime && dt.time ? `<span class="mini-time">${htmlEscape(dt.time)}</span>` : ""}
       </div>
     </div>
     <div class="logo">
