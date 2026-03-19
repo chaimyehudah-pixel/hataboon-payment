@@ -32,6 +32,7 @@ const BUSINESS_WHATSAPP_URL = "https://wa.me/972524150000";
 const BUSINESS_WHATSAPP_DISPLAY = "052-415-0000";
 const PAYMENT_ENTRY_URL = "https://hataboon-payment-production.up.railway.app/pay/0/0";
 const BUSINESS_ID_LABEL = "ע.מ. 021957303";
+const BUSINESS_ID_NUMBER_ONLY = "021957303";
 const BUSINESS_WEBSITE_URL = "https://www.hataboon.co.il";
 const BUSINESS_WEBSITE_DISPLAY = "www.hataboon.co.il";
 const PAYMENT_HEADER_INLINE_TEXT = "הטאבון, פיצרייה ובית קפה";
@@ -822,7 +823,7 @@ function renderBusinessInfoPage() {
 
       <ul class="info-list">
         <li><strong>שם העסק:</strong> ${htmlEscape(BUSINESS_NAME)}</li>
-        <li><strong>עוסק מורשה:</strong> ${htmlEscape(BUSINESS_ID_LABEL)}</li>
+        <li><strong>עוסק מורשה:</strong> ${htmlEscape(BUSINESS_ID_NUMBER_ONLY)}</li>
         <li><strong>טלפון בית העסק:</strong> <span class="nowrap-text">${htmlEscape(BUSINESS_PHONE_DISPLAY)}</span></li>
         <li><strong>כתובת העסק:</strong> ${htmlEscape(BUSINESS_FULL_ADDRESS)}</li>
         <li><strong>שירותים / מוצרים:</strong> פיצרייה ובית קפה באיסוף עצמי, ישיבה במקום, ומשלוחים.</li>
