@@ -440,28 +440,6 @@ body{
   min-height:140px;
   margin-bottom:8px;
 }
-.top-mini-right{
-  position:absolute;
-  top:8px;
-  left:0;
-  text-align:right;
-  color:#7b5d2b;
-  width:150px;
-}
-.top-mini-right .mini-line{
-  display:block;
-  font-size:14px;
-  line-height:1.2;
-  font-weight:500;
-}
-.top-mini-right .mini-date,
-.top-mini-right .mini-time{
-  display:block;
-  font-size:16px;
-  line-height:1.2;
-  font-weight:800;
-  color:#6d5628;
-}
 .logo{
   text-align:center;
   margin:0 auto 6px;
@@ -481,7 +459,7 @@ body{
   border-bottom:2px solid #e4d1a0;
   padding:3px 8px;
 }
-.payment-inline-bar{
+.inline-business-bar{
   text-align:center;
   font-size:14px;
   color:#5b4822;
@@ -490,12 +468,26 @@ body{
   line-height:1.5;
   font-weight:600;
 }
-.payment-inline-bar .phone-emoji{
+.inline-business-bar .phone-emoji{
   margin:0 4px;
 }
-.payment-inline-bar .inline-phone,
-.payment-inline-bar .inline-date,
-.payment-inline-bar .inline-time{
+.inline-business-bar .inline-phone{
+  white-space:nowrap;
+  display:inline-block;
+  direction:ltr;
+  unicode-bidi:isolate;
+}
+.inline-datetime-bar{
+  text-align:center;
+  font-size:14px;
+  color:#5b4822;
+  margin:4px auto 0;
+  max-width:680px;
+  line-height:1.5;
+  font-weight:700;
+}
+.inline-datetime-bar .inline-date,
+.inline-datetime-bar .inline-time{
   white-space:nowrap;
   display:inline-block;
   direction:ltr;
@@ -714,17 +706,8 @@ a.btn.secondary{
   .top-area{
     min-height:125px;
   }
-  .top-mini-right{
-    width:120px;
-  }
-  .top-mini-right .mini-line{
-    font-size:13px;
-  }
-  .top-mini-right .mini-date,
-  .top-mini-right .mini-time{
-    font-size:15px;
-  }
-  .payment-inline-bar{
+  .inline-business-bar,
+  .inline-datetime-bar{
     font-size:13px;
     max-width:100%;
   }
@@ -753,35 +736,27 @@ a.btn.secondary{
 
 function renderHeaderMini(options = {}) {
   const {
-    showDateTime = false,
-    dateValue = new Date(),
-    hideTopMini = false,
-    showPaymentInlineBar = false
+    showDateTimeLine = false,
+    dateValue = new Date()
   } = options;
 
   const dt = formatIsraelDateTimeParts(dateValue);
 
   return `
     <div class="top-area">
-      ${hideTopMini ? "" : `
-      <div class="top-mini-right">
-        <span class="mini-line">${htmlEscape(BUSINESS_NAME)}</span>
-        <span class="mini-line nowrap-text">${htmlEscape(BUSINESS_PHONE_DISPLAY)}</span>
-        ${showDateTime && dt.date ? `<span class="mini-date">${htmlEscape(dt.date)}</span>` : ""}
-        ${showDateTime && dt.time ? `<span class="mini-time">${htmlEscape(dt.time)}</span>` : ""}
-      </div>
-      `}
       <div class="logo">
         <img src="/logo.jpeg" alt="${htmlEscape(BUSINESS_NAME)}">
       </div>
       <div class="address-line">
         ${htmlEscape(BUSINESS_STREET)} &nbsp;&nbsp; ${htmlEscape(BUSINESS_ADDRESS)}
       </div>
-      ${showPaymentInlineBar ? `
-      <div class="payment-inline-bar">
+      <div class="inline-business-bar">
         ${htmlEscape(PAYMENT_HEADER_INLINE_TEXT)}
         <span class="phone-emoji">☎</span>
         <span class="inline-phone">${htmlEscape(BUSINESS_PHONE_DISPLAY)}</span>
+      </div>
+      ${showDateTimeLine ? `
+      <div class="inline-datetime-bar">
         <span class="inline-date">${htmlEscape(dt.date)}</span>
         <span class="inline-time">${htmlEscape(dt.time)}</span>
       </div>
@@ -875,11 +850,7 @@ function renderPaymentPage({ orderId, amount, phone }) {
   return renderLayout({
     title: "תשלום להזמנה",
     body: `
-      ${renderHeaderMini({
-        hideTopMini: true,
-        showPaymentInlineBar: true,
-        dateValue: new Date()
-      })}
+      ${renderHeaderMini()}
       <h1>תשלום להזמנה #${htmlEscape(orderId)}</h1>
       <div class="subtitle">
         תשלום זה מיועד להזמנה שבוצעה טלפונית או ישירות מול בית העסק.
@@ -937,7 +908,7 @@ function renderSuccess({ receipt, orderIdFromUrl }) {
     title: "אישור תשלום",
     body: `
       ${renderHeaderMini({
-        showDateTime: true,
+        showDateTimeLine: true,
         dateValue: transactionDateTime || new Date()
       })}
 
