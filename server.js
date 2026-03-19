@@ -442,23 +442,24 @@ body{
 .top-mini-right{
   position:absolute;
   top:8px;
-  right:auto;
   left:0;
   text-align:right;
   color:#7b5d2b;
-  font-size:14px;
-  line-height:1.2;
-  width:130px;
+  width:150px;
 }
 .top-mini-right .mini-line{
   display:block;
+  font-size:14px;
+  line-height:1.2;
+  font-weight:500;
 }
 .top-mini-right .mini-date,
 .top-mini-right .mini-time{
   display:block;
-  font-size:12px;
-  color:#7a6747;
+  font-size:16px;
   line-height:1.2;
+  font-weight:800;
+  color:#6d5628;
 }
 .logo{
   text-align:center;
@@ -588,9 +589,30 @@ a.btn.secondary{
   max-width:700px;
   margin:0 auto;
 }
+.receipt-top-details{
+  width:100%;
+  margin:8px 0 28px;
+  text-align:right;
+}
+.receipt-top-row{
+  margin-bottom:8px;
+}
+.receipt-top-label{
+  display:block;
+  font-size:14px;
+  color:#444;
+  font-weight:700;
+  margin-bottom:4px;
+}
+.receipt-top-value{
+  display:block;
+  font-size:18px;
+  color:#111;
+  font-weight:800;
+}
 .receipt-header{
   text-align:center;
-  margin:10px 0 26px;
+  margin:6px 0 26px;
 }
 .receipt-title{
   font-size:28px;
@@ -672,8 +694,14 @@ a.btn.secondary{
     min-height:125px;
   }
   .top-mini-right{
-    width:110px;
+    width:120px;
+  }
+  .top-mini-right .mini-line{
     font-size:13px;
+  }
+  .top-mini-right .mini-date,
+  .top-mini-right .mini-time{
+    font-size:15px;
   }
   h1,
   .receipt-title{
@@ -868,6 +896,17 @@ function renderSuccess({ receipt, orderIdFromUrl }) {
       })}
 
       <div class="receipt-wrap">
+        <div class="receipt-top-details">
+          <div class="receipt-top-row">
+            <span class="receipt-top-label">לכבוד:</span>
+            <span class="receipt-top-value">${htmlEscape(customerName)}</span>
+          </div>
+          <div class="receipt-top-row">
+            <span class="receipt-top-label">טלפון:</span>
+            <span class="receipt-top-value nowrap-text">${htmlEscape(phone)}</span>
+          </div>
+        </div>
+
         <div class="receipt-header">
           <div class="receipt-title">אישור תשלום</div>
           <div class="success-title">✅ התשלום עבר בהצלחה</div>
@@ -875,8 +914,6 @@ function renderSuccess({ receipt, orderIdFromUrl }) {
           ${receiptSerial ? `<div class="receipt-serial">מספר קבלה: ${htmlEscape(receiptSerial)}</div>` : ""}
         </div>
 
-        ${block("לכבוד:", customerName)}
-        ${block("טלפון:", phone, "nowrap-text")}
         ${block("תשלום עבור הזמנה:", effectiveOrderId)}
         ${block("סכום העסקה:", amount ? amount + " ₪" : "")}
         ${block("מספר אישור מחברת האשראי:", approval)}
