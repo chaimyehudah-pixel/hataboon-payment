@@ -1,10 +1,29 @@
 const express = require("express");
-const crypto = require("crypto");
 const { google } = require("googleapis");
 
 const app = express();
+
+app.use(express.urlencoded({ extended: true }));
 app.use(express.json());
 
+/* =========================
+   🔥 CORS – חובה בשביל האתר שלך
+========================= */
+app.use((req, res, next) => {
+  res.header("Access-Control-Allow-Origin", "*");
+  res.header("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+  res.header("Access-Control-Allow-Headers", "Content-Type");
+
+  if (req.method === "OPTIONS") {
+    return res.sendStatus(200);
+  }
+
+  next();
+});
+
+/* =========================
+   ENV
+========================= */
 const PORT = process.env.PORT || 3000;
 
 const ZC_KEY = process.env.ZC_KEY;
@@ -14,6 +33,7 @@ const BASE_URL = process.env.BASE_URL;
 
 const GOOGLE_SERVICE_ACCOUNT = process.env.GOOGLE_SERVICE_ACCOUNT;
 const GOOGLE_SHEET_ID = process.env.GOOGLE_SHEET_ID;
+
 const SHEET_NAME = "payments";
 
 /* =========================
@@ -38,12 +58,14 @@ async function appendPayment(row) {
     spreadsheetId: GOOGLE_SHEET_ID,
     range: `${SHEET_NAME}!A:J`,
     valueInputOption: "RAW",
-    requestBody: { values: [row] }
+    requestBody: {
+      values: [row]
+    }
   });
 }
 
 /* =========================
-   CREATE ZCREDIT SESSION
+   ZCREDIT
 ========================= */
 async function createZCreditSession({ orderId, amount, name, phone }) {
   const uniqueId = "new-" + orderId + "-" + Date.now();
@@ -76,23 +98,23 @@ async function createZCreditSession({ orderId, amount, name, phone }) {
     }]
   };
 
-  const res = await fetch("https://pci.zcredit.co.il/webcheckout/api/WebCheckout/CreateSession", {
+  const response = await fetch("https://pci.zcredit.co.il/webcheckout/api/WebCheckout/CreateSession", {
     method: "POST",
-    headers: {"Content-Type": "application/json"},
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload)
   });
 
-  const data = await res.json();
+  const data = await response.json();
 
   if (data?.Data?.SessionUrl) {
     return data.Data.SessionUrl;
   }
 
-  throw new Error("ZCredit failed");
+  throw new Error(JSON.stringify(data));
 }
 
 /* =========================
-   🔥 חדש – הזמנה מהאתר שלך
+   🔥 חדש – מהאתר שלך
 ========================= */
 app.post("/create-order-session", async (req, res) => {
   try {
@@ -108,8 +130,8 @@ app.post("/create-order-session", async (req, res) => {
     res.json({ url: sessionUrl });
 
   } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: "שגיאה בתשלום" });
+    console.error("ERROR:", err);
+    res.status(500).json({ error: "שגיאה ביצירת תשלום" });
   }
 });
 
@@ -136,7 +158,7 @@ app.post("/zc-callback", async (req, res) => {
       new Date().toLocaleString("he-IL"),
       "no",
       "",
-      "new_order_system"   // 👈 הכי חשוב
+      "new_order_system"
     ]);
 
     console.log("✔ payment saved");
@@ -149,17 +171,17 @@ app.post("/zc-callback", async (req, res) => {
 });
 
 /* =========================
-   SUCCESS PAGE
+   SUCCESS
 ========================= */
 app.get("/payment-success", (req, res) => {
   res.send(`
     <h1>התשלום עבר בהצלחה ✅</h1>
-    <p>מספר הזמנה: ${req.query.orderId}</p>
+    <h2>מספר הזמנה: ${req.query.orderId}</h2>
   `);
 });
 
 /* =========================
-   CANCEL PAGE
+   CANCEL
 ========================= */
 app.get("/payment-cancel", (req, res) => {
   res.send(`
@@ -168,13 +190,13 @@ app.get("/payment-cancel", (req, res) => {
 });
 
 /* =========================
-   שמירה על המערכת הישנה!
+   ⚠️ המערכת הישנה – לא נוגעים
 ========================= */
 app.get("/pay/:phone/:orderId/:amount", (req, res) => {
-  res.send("מערכת ישנה - לא נוגעים");
+  res.send("מערכת תשלום ישנה");
 });
 
 /* ========================= */
 app.listen(PORT, () => {
-  console.log("🚀 server running on", PORT);
+  console.log("🚀 Server running on port", PORT);
 });
