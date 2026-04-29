@@ -1,121 +1,96 @@
 const express = require("express");
+const crypto = require("crypto");
 const { google } = require("googleapis");
 
 const app = express();
-
 app.use(express.urlencoded({ extended: true }));
 app.use(express.json());
 
-/* =========================
-   🔥 CORS – חובה בשביל האתר שלך
-========================= */
-app.use((req, res, next) => {
-  res.header("Access-Control-Allow-Origin", "*");
-  res.header("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
-  res.header("Access-Control-Allow-Headers", "Content-Type");
-
-  if (req.method === "OPTIONS") {
-    return res.sendStatus(200);
-  }
-
-  next();
-});
-
-/* =========================
-   ENV
-========================= */
 const PORT = process.env.PORT || 3000;
 
-const ZC_KEY = process.env.ZC_KEY;
-const ZC_TERMINAL = process.env.ZC_TERMINAL;
-const ZC_PASSWORD = process.env.ZC_PASSWORD;
-const BASE_URL = process.env.BASE_URL;
+// ZCREDIT
+const BASE_URL = String(process.env.BASE_URL || "").trim();
+const ZC_KEY = String(process.env.ZC_KEY || "").trim();
+const ZC_TERMINAL = String(process.env.ZC_TERMINAL || "").trim();
+const ZC_PASSWORD = String(process.env.ZC_PASSWORD || "").trim();
 
-const GOOGLE_SERVICE_ACCOUNT = process.env.GOOGLE_SERVICE_ACCOUNT;
+// GOOGLE SHEETS
+const GOOGLE_SERVICE_ACCOUNT = JSON.parse(process.env.GOOGLE_SERVICE_ACCOUNT);
 const GOOGLE_SHEET_ID = process.env.GOOGLE_SHEET_ID;
-
 const SHEET_NAME = "payments";
 
-/* =========================
-   GOOGLE SHEETS
-========================= */
-function getSheets() {
-  const credentials = JSON.parse(GOOGLE_SERVICE_ACCOUNT);
-  credentials.private_key = credentials.private_key.replace(/\\n/g, "\n");
+// =======================
+// 🔐 Google Sheets Auth
+// =======================
+const auth = new google.auth.GoogleAuth({
+  credentials: GOOGLE_SERVICE_ACCOUNT,
+  scopes: ["https://www.googleapis.com/auth/spreadsheets"],
+});
 
-  const auth = new google.auth.GoogleAuth({
-    credentials,
-    scopes: ["https://www.googleapis.com/auth/spreadsheets"]
-  });
-
-  return google.sheets({ version: "v4", auth });
-}
-
-async function appendPayment(row) {
-  const sheets = getSheets();
+async function appendPaymentToSheet(data) {
+  const client = await auth.getClient();
+  const sheets = google.sheets({ version: "v4", auth: client });
 
   await sheets.spreadsheets.values.append({
     spreadsheetId: GOOGLE_SHEET_ID,
-    range: `${SHEET_NAME}!A:J`,
-    valueInputOption: "RAW",
+    range: `${SHEET_NAME}!A:K`,
+    valueInputOption: "USER_ENTERED",
     requestBody: {
-      values: [row]
+      values: [[
+        data.token || "",
+        data.orderId || "",
+        data.name || "",
+        data.phone || "",
+        data.amount || "",
+        data.approvalNumber || "",
+        data.paymentDate || "",
+        data.handled || "",
+        "", // מספר קבלה רץ (אם יש לך לוגיקה – תוסיף)
+        data.last4 || "",
+        data.source || ""   // ⭐️ החדש
+      ]]
     }
   });
 }
 
-/* =========================
-   ZCREDIT
-========================= */
-async function createZCreditSession({ orderId, amount, name, phone }) {
-  const uniqueId = "new-" + orderId + "-" + Date.now();
-
+// =======================
+// 💳 יצירת סשן תשלום
+// =======================
+async function createZCreditSession(order) {
   const payload = {
-    Key: ZC_KEY,
     TerminalNumber: ZC_TERMINAL,
+    Username: ZC_KEY,
     Password: ZC_PASSWORD,
-    UniqueID: uniqueId,
-
-    SuccessUrl: `${BASE_URL}/payment-success?orderId=${orderId}&uniqueId=${uniqueId}&source=new_order_system`,
-    CancelUrl: `${BASE_URL}/payment-cancel?orderId=${orderId}&source=new_order_system`,
-    CallBackUrl: `${BASE_URL}/zc-callback`,
-
+    Amount: order.amount,
     Currency: "ILS",
-    Total: Number(amount),
-
+    Order: order.orderId,
+    SuccessUrl: `${BASE_URL}/payment-success`,
+    CancelUrl: `${BASE_URL}/payment-cancel`,
     Customer: {
-      Name: name,
-      PhoneNumber: phone
+      Name: order.name,
+      PhoneNumber: order.phone
     },
-
-    AdditionalText: orderId,
-
-    CartItems: [{
-      Description: "תשלום להזמנה " + orderId,
-      Quantity: 1,
-      UnitPrice: Number(amount),
-      Amount: Number(amount)
-    }]
+    AdditionalText: "new_order_system"
   };
 
-  const response = await fetch("https://pci.zcredit.co.il/webcheckout/api/WebCheckout/CreateSession", {
+  const res = await fetch("https://pci.zcredit.co.il/WebCheckout/api/WebCheckout/CreateSession", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload)
   });
 
-  const data = await response.json();
+  const data = await res.json();
 
-  if (data?.Data?.SessionUrl) {
+  if (res.ok && data?.Data?.SessionUrl) {
     return data.Data.SessionUrl;
   }
 
   throw new Error(JSON.stringify(data));
 }
 
-/* =========================
-   🔥 חדש – מהאתר שלך
-========================= */
+// =======================
+// 🚀 יצירת הזמנה + מעבר לתשלום
+// =======================
 app.post("/create-order-session", async (req, res) => {
   try {
     const { orderId, amount, name, phone } = req.body;
@@ -130,73 +105,50 @@ app.post("/create-order-session", async (req, res) => {
     res.json({ url: sessionUrl });
 
   } catch (err) {
-    console.error("ERROR:", err);
+    console.error("ZCredit error:", err.message);
     res.status(500).json({ error: "שגיאה ביצירת תשלום" });
   }
 });
 
-/* =========================
-   CALLBACK מהאשראי
-========================= */
-app.post("/zc-callback", async (req, res) => {
+// =======================
+// ✅ הצלחה
+// =======================
+app.get("/payment-success", async (req, res) => {
   try {
-    const body = req.body;
+    const { Order, ApprovalNumber, Card4Digits } = req.query;
 
-    if (!body.ApprovalNumber) {
-      return res.send("OK");
-    }
+    await appendPaymentToSheet({
+      token: crypto.randomUUID(),
+      orderId: Order,
+      name: "",
+      phone: "",
+      amount: "",
+      approvalNumber: ApprovalNumber,
+      paymentDate: new Date().toLocaleString("he-IL"),
+      handled: "1",
+      last4: Card4Digits,
+      source: "new_order_system" // ⭐️ חשוב
+    });
 
-    const orderId = body.AdditionalText;
-
-    await appendPayment([
-      body.UniqueID,
-      orderId,
-      body.CustomerName || "",
-      body.Phone || "",
-      body.Total || "",
-      body.ApprovalNumber,
-      new Date().toLocaleString("he-IL"),
-      "no",
-      "",
-      "new_order_system"
-    ]);
-
-    console.log("✔ payment saved");
+    res.send(`
+      <h1>✅ התשלום עבר בהצלחה</h1>
+      <h3>מספר הזמנה: ${Order}</h3>
+    `);
 
   } catch (err) {
-    console.error("callback error", err);
+    console.error(err);
+    res.send("שגיאה בעדכון תשלום");
   }
-
-  res.send("OK");
 });
 
-/* =========================
-   SUCCESS
-========================= */
-app.get("/payment-success", (req, res) => {
-  res.send(`
-    <h1>התשלום עבר בהצלחה ✅</h1>
-    <h2>מספר הזמנה: ${req.query.orderId}</h2>
-  `);
-});
-
-/* =========================
-   CANCEL
-========================= */
+// =======================
+// ❌ ביטול
+// =======================
 app.get("/payment-cancel", (req, res) => {
-  res.send(`
-    <h1>התשלום בוטל ❌</h1>
-  `);
+  res.send("<h1>❌ התשלום בוטל</h1>");
 });
 
-/* =========================
-   ⚠️ המערכת הישנה – לא נוגעים
-========================= */
-app.get("/pay/:phone/:orderId/:amount", (req, res) => {
-  res.send("מערכת תשלום ישנה");
-});
-
-/* ========================= */
+// =======================
 app.listen(PORT, () => {
-  console.log("🚀 Server running on port", PORT);
+  console.log("Server running on port", PORT);
 });
