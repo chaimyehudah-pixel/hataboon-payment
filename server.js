@@ -355,29 +355,24 @@ app.post("/create-order-session", async (req, res) => {
   }
 });
 
-async function handleZcCallback(req, res) {
+async function processZcCallbackInBackground(body) {
   try {
-    const body = req.body || {};
     const uniqueId = String(body.UniqueID || "").trim();
     const approvalNumber = String(body.ApprovalNumber || "").trim();
 
-    if (!approvalNumber) {
-      return res.send("OK");
-    }
+    if (!approvalNumber) return;
 
     const receipt = receipts.get(uniqueId) || {
       token: uniqueId,
-      orderId: cleanOrderId(body.AdditionalText || ""),
+      orderId: cleanOrderId(body.AdditionalText || body.UniqueID || ""),
       name: String(body.CustomerName || "").trim(),
-      phone: normalizePhoneLocal(body.Phone || ""),
+      phone: normalizePhoneLocal(body.CustomerPhone || body.Phone || ""),
       amount: body.Total || "",
       source: "unknown",
       appended: false
     };
 
-    if (receipt.appended) {
-      return res.send("OK");
-    }
+    if (receipt.appended) return;
 
     const paymentDate = formatDate();
     const paymentLast4 = extractLast4(body);
@@ -403,11 +398,26 @@ async function handleZcCallback(req, res) {
     receipt.paymentLast4 = paymentLast4;
 
     receipts.set(uniqueId, receipt);
-  } catch (err) {
-    console.error("zc-callback error:", err.message);
-  }
 
-  res.send("OK");
+    console.log("zc-callback processed:", {
+      uniqueId,
+      orderId: receipt.orderId,
+      amount: receipt.amount,
+      approvalNumber
+    });
+  } catch (err) {
+    console.error("zc-callback background error:", err.message);
+  }
+}
+
+function handleZcCallback(req, res) {
+  const body = req.body || {};
+
+  res.status(200).send("OK");
+
+  setImmediate(() => {
+    processZcCallbackInBackground(body);
+  });
 }
 
 app.all("/zc-callback", handleZcCallback);
