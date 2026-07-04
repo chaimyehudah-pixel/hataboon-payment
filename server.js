@@ -43,6 +43,80 @@ function getNowIsrael() {
   });
 }
 
+function pickFirst(body, names) {
+  for (const name of names) {
+    if (body && body[name] !== undefined && body[name] !== null && String(body[name]).trim() !== "") {
+      return String(body[name]).trim();
+    }
+  }
+  return "";
+}
+
+function findValueByKeyIncludes(obj, keywords) {
+  if (!obj || typeof obj !== "object") return "";
+  const lowered = keywords.map(k => String(k).toLowerCase());
+
+  for (const [key, val] of Object.entries(obj)) {
+    const k = String(key).toLowerCase();
+    if (lowered.some(word => k.includes(word)) && val !== undefined && val !== null && String(val).trim() !== "") {
+      return String(val).trim();
+    }
+  }
+  return "";
+}
+
+function detectCreditEntryType(body) {
+  const raw = [
+    pickFirst(body, [
+      "WalletType", "Wallet", "DigitalWallet", "CardWallet",
+      "CardEntryMode", "EntryMode", "PaymentMethod", "PaymentType",
+      "CardInputType", "CardPresent", "Brand", "CardBrand",
+      "TokenType", "Issuer", "Eci", "ECI"
+    ]),
+    findValueByKeyIncludes(body, ["wallet", "entry", "method", "apple", "google", "digital", "token", "eci"])
+  ].filter(Boolean).join(" | ");
+
+  const s = raw.toLowerCase();
+
+  if (s.includes("apple")) return "apple_pay";
+  if (s.includes("google")) return "google_pay";
+  if (s.includes("wallet") || s.includes("digital")) return "digital_wallet";
+  if (s.includes("manual") || s.includes("typed") || s.includes("keyed")) return "manual_card";
+  if (s.includes("credit")) return "credit_card";
+
+  return raw || "unknown";
+}
+
+function extractEmail(body) {
+  return pickFirst(body, [
+    "Email",
+    "CustomerEmail",
+    "ClientEmail",
+    "PayerEmail",
+    "Mail",
+    "EMail",
+    "email",
+    "customer_email"
+  ]) || findValueByKeyIncludes(body, ["email", "mail"]);
+}
+
+function extractCustomerIdNumber(body) {
+  return cleanDigits(pickFirst(body, [
+    "CustomerID",
+    "CustomerId",
+    "CustomerIdNumber",
+    "CustomerIdentity",
+    "IdentityNumber",
+    "IdNumber",
+    "IDNumber",
+    "TZ",
+    "TeudatZehut",
+    "SocialId",
+    "VatNumber",
+    "CompanyId"
+  ]) || findValueByKeyIncludes(body, ["identity", "idnumber", "customerid", "vat", "tz", "zehut"]));
+}
+
 /* ================= GOOGLE ================= */
 
 function getSheets() {
@@ -68,33 +142,35 @@ function getSheets() {
 async function saveToSheet(data) {
   const sheets = getSheets();
 
-  // מבנה חדש של גיליון payments:
-  // A Token
-  // B OrderId
-  // C OrderDateTime
-  // D CustomerName
-  // E Phone
-  // F Email
-  // G CustomerIdNumber
-  // H Amount
-  // I ApprovalNumber
-  // J PaymentDate
-  // K DocumentType
-  // L PaymentMethod
-  // M Subject
-  // N Remarks
-  // O LinkedDocumentToken
-  // P LinkedDocumentNumber
-  // Q Status
-  // R DocumentNumber
-  // S PublicUrl
-  // T AdminUrl
-  // U MailSent
-  // V Error
-  // W CreditLast4
+  // New schema A:X
+  // A  Token
+  // B  OrderId
+  // C  OrderDateTime
+  // D  CustomerName
+  // E  Phone
+  // F  Email
+  // G  CustomerIdNumber
+  // H  Amount
+  // I  ApprovalNumber
+  // J  PaymentDate
+  // K  DocumentType
+  // L  PaymentMethod
+  // M  Subject
+  // N  Remarks
+  // O  LinkedDocumentToken
+  // P  LinkedDocumentNumber
+  // Q  Status
+  // R  DocumentNumber
+  // S  PublicUrl
+  // T  AdminUrl
+  // U  MailSent
+  // V  Error
+  // W  CreditLast4
+  // X  CreditEntryType
+
   await sheets.spreadsheets.values.append({
     spreadsheetId: GOOGLE_SHEET_ID,
-    range: "payments!A:W",
+    range: "payments!A:X",
     valueInputOption: "RAW",
     requestBody: {
       values: [[
@@ -111,16 +187,17 @@ async function saveToSheet(data) {
         String(data.documentType || "receipt"),
         String(data.paymentMethod || "credit"),
         String(data.subject || ""),
-        String(data.remarks || ""),
+        String(data.remarks || data.source || ""),
         String(data.linkedDocumentToken || ""),
         String(data.linkedDocumentNumber || ""),
-        String(data.status || "no"),
+        "no",
         String(data.documentNumber || ""),
         String(data.publicUrl || ""),
         String(data.adminUrl || ""),
         String(data.mailSent || ""),
         String(data.error || ""),
-        String(data.last4 || "")
+        String(data.last4 || ""),
+        String(data.creditEntryType || "")
       ]]
     }
   });
@@ -379,50 +456,12 @@ function extractLast4(body) {
   return d.length >= 4 ? d.slice(-4) : "";
 }
 
-function pickFirst(...values) {
-  for (const v of values) {
-    const s = String(v || "").trim();
-    if (s) return s;
-  }
-  return "";
-}
-
-function extractEmail(body) {
-  return pickFirst(
-    body.Email,
-    body.email,
-    body.CustomerEmail,
-    body.CustomerMail,
-    body.ClientEmail,
-    body.BillingEmail,
-    body.PayerEmail,
-    body.CardOwnerEmail,
-    body.UserEmail
-  );
-}
-
-function extractCustomerIdNumber(body) {
-  return cleanDigits(pickFirst(
-    body.CustomerID,
-    body.CustomerId,
-    body.CustomerIdNumber,
-    body.CustomerIdentityNumber,
-    body.IdentityNumber,
-    body.IDNumber,
-    body.IdNumber,
-    body.TZ,
-    body.Taz,
-    body.BusinessNumber,
-    body.CompanyId,
-    body.VatNumber
-  ));
-}
-
 async function processCallback(body) {
   try {
-    console.log("ZCredit callback body:", JSON.stringify(body || {}, null, 2));
+    console.log("ZCredit callback body:", JSON.stringify(body, null, 2));
+
     const uniqueId = String(body.UniqueID || body.UniqueId || body.UID || "").trim();
-    const approval = String(body.ApprovalNumber || "").trim();
+    const approval = String(body.ApprovalNumber || body.AuthNumber || body.ConfirmationCode || "").trim();
 
     if (!approval) {
       console.log("callback ignored: no approval number");
@@ -436,6 +475,10 @@ async function processCallback(body) {
       return;
     }
 
+    const email = extractEmail(body);
+    const customerIdNumber = extractCustomerIdNumber(body);
+    const creditEntryType = detectCreditEntryType(body);
+
     const paymentData = {
       token: uniqueId,
       orderId:
@@ -443,21 +486,31 @@ async function processCallback(body) {
         cleanDigits(body.AdditionalText) ||
         extractOrderIdFromUniqueId(uniqueId) ||
         cleanDigits(body.ReferenceNumber),
-      name: rec.name || String(body.CustomerName || "").trim(),
+      orderDateTime: "",
+      name: rec.name || String(body.CustomerName || body.Name || "").trim(),
       phone: rec.phone || normalizePhoneLocal(body.CustomerPhone || body.Phone || ""),
+      email,
+      customerIdNumber,
       amount: rec.amount || body.Total || "",
       approval,
-      email: extractEmail(body),
-      customerIdNumber: extractCustomerIdNumber(body),
       paymentDate: getNowIsrael(),
       documentType: "receipt",
       paymentMethod: "credit",
       subject: "",
-      remarks: rec.source || "unknown",
+      remarks: rec.source || "manual_payment_link",
+      linkedDocumentToken: "",
+      linkedDocumentNumber: "",
       documentNumber: "",
+      publicUrl: "",
+      adminUrl: "",
+      mailSent: "",
+      error: "",
       last4: extractLast4(body),
+      creditEntryType,
       source: rec.source || "unknown"
     };
+
+    console.log("parsed payment data for sheet:", JSON.stringify(paymentData, null, 2));
 
     await saveToSheet(paymentData);
 
