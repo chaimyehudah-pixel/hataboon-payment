@@ -68,23 +68,59 @@ function getSheets() {
 async function saveToSheet(data) {
   const sheets = getSheets();
 
+  // מבנה חדש של גיליון payments:
+  // A Token
+  // B OrderId
+  // C OrderDateTime
+  // D CustomerName
+  // E Phone
+  // F Email
+  // G CustomerIdNumber
+  // H Amount
+  // I ApprovalNumber
+  // J PaymentDate
+  // K DocumentType
+  // L PaymentMethod
+  // M Subject
+  // N Remarks
+  // O LinkedDocumentToken
+  // P LinkedDocumentNumber
+  // Q Status
+  // R DocumentNumber
+  // S PublicUrl
+  // T AdminUrl
+  // U MailSent
+  // V Error
+  // W CreditLast4
   await sheets.spreadsheets.values.append({
     spreadsheetId: GOOGLE_SHEET_ID,
-    range: "payments!A:K",
+    range: "payments!A:W",
     valueInputOption: "RAW",
     requestBody: {
       values: [[
         String(data.token || ""),
         String(data.orderId || ""),
+        String(data.orderDateTime || ""),
         String(data.name || ""),
         String(data.phone || ""),
+        String(data.email || ""),
+        String(data.customerIdNumber || ""),
         String(data.amount || ""),
         String(data.approval || ""),
         String(data.paymentDate || getNowIsrael()),
-        "no",
-        String(data.receiptSerial || ""),
-        String(data.last4 || ""),
-        String(data.source || "")
+        String(data.documentType || "receipt"),
+        String(data.paymentMethod || "credit"),
+        String(data.subject || ""),
+        String(data.remarks || ""),
+        String(data.linkedDocumentToken || ""),
+        String(data.linkedDocumentNumber || ""),
+        String(data.status || "no"),
+        String(data.documentNumber || ""),
+        String(data.publicUrl || ""),
+        String(data.adminUrl || ""),
+        String(data.mailSent || ""),
+        String(data.error || ""),
+        String(data.last4 || "")
       ]]
     }
   });
@@ -343,8 +379,48 @@ function extractLast4(body) {
   return d.length >= 4 ? d.slice(-4) : "";
 }
 
+function pickFirst(...values) {
+  for (const v of values) {
+    const s = String(v || "").trim();
+    if (s) return s;
+  }
+  return "";
+}
+
+function extractEmail(body) {
+  return pickFirst(
+    body.Email,
+    body.email,
+    body.CustomerEmail,
+    body.CustomerMail,
+    body.ClientEmail,
+    body.BillingEmail,
+    body.PayerEmail,
+    body.CardOwnerEmail,
+    body.UserEmail
+  );
+}
+
+function extractCustomerIdNumber(body) {
+  return cleanDigits(pickFirst(
+    body.CustomerID,
+    body.CustomerId,
+    body.CustomerIdNumber,
+    body.CustomerIdentityNumber,
+    body.IdentityNumber,
+    body.IDNumber,
+    body.IdNumber,
+    body.TZ,
+    body.Taz,
+    body.BusinessNumber,
+    body.CompanyId,
+    body.VatNumber
+  ));
+}
+
 async function processCallback(body) {
   try {
+    console.log("ZCredit callback body:", JSON.stringify(body || {}, null, 2));
     const uniqueId = String(body.UniqueID || body.UniqueId || body.UID || "").trim();
     const approval = String(body.ApprovalNumber || "").trim();
 
@@ -371,8 +447,14 @@ async function processCallback(body) {
       phone: rec.phone || normalizePhoneLocal(body.CustomerPhone || body.Phone || ""),
       amount: rec.amount || body.Total || "",
       approval,
+      email: extractEmail(body),
+      customerIdNumber: extractCustomerIdNumber(body),
       paymentDate: getNowIsrael(),
-      receiptSerial: "",
+      documentType: "receipt",
+      paymentMethod: "credit",
+      subject: "",
+      remarks: rec.source || "unknown",
+      documentNumber: "",
       last4: extractLast4(body),
       source: rec.source || "unknown"
     };
