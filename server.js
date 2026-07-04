@@ -65,32 +65,10 @@ function findValueByKeyIncludes(obj, keywords) {
   return "";
 }
 
-function detectCreditEntryType(body) {
-  const raw = [
-    pickFirst(body, [
-      "WalletType", "Wallet", "DigitalWallet", "CardWallet",
-      "CardEntryMode", "EntryMode", "PaymentMethod", "PaymentType",
-      "CardInputType", "CardPresent", "Brand", "CardBrand",
-      "TokenType", "Issuer", "Eci", "ECI"
-    ]),
-    findValueByKeyIncludes(body, ["wallet", "entry", "method", "apple", "google", "digital", "token", "eci"])
-  ].filter(Boolean).join(" | ");
-
-  const s = raw.toLowerCase();
-
-  if (s.includes("apple")) return "apple_pay";
-  if (s.includes("google")) return "google_pay";
-  if (s.includes("wallet") || s.includes("digital")) return "digital_wallet";
-  if (s.includes("manual") || s.includes("typed") || s.includes("keyed")) return "manual_card";
-  if (s.includes("credit")) return "credit_card";
-
-  return raw || "unknown";
-}
-
 function extractEmail(body) {
   return pickFirst(body, [
-    "Email",
     "CustomerEmail",
+    "Email",
     "ClientEmail",
     "PayerEmail",
     "Mail",
@@ -102,6 +80,7 @@ function extractEmail(body) {
 
 function extractCustomerIdNumber(body) {
   return cleanDigits(pickFirst(body, [
+    "HolderId",
     "CustomerID",
     "CustomerId",
     "CustomerIdNumber",
@@ -114,7 +93,99 @@ function extractCustomerIdNumber(body) {
     "SocialId",
     "VatNumber",
     "CompanyId"
-  ]) || findValueByKeyIncludes(body, ["identity", "idnumber", "customerid", "vat", "tz", "zehut"]));
+  ]) || findValueByKeyIncludes(body, ["holderid", "identity", "idnumber", "customerid", "vat", "tz", "zehut"]));
+}
+
+function extractLast4(body) {
+  const raw =
+    body.CardNum ||
+    body.CardMask ||
+    body.CardNumber ||
+    body.Pan ||
+    body.PAN ||
+    "";
+
+  const d = cleanDigits(raw);
+  return d.length >= 4 ? d.slice(-4) : "";
+}
+
+function extractVoucherNumber(body) {
+  return pickFirst(body, [
+    "VoucherNumber",
+    "Voucher",
+    "Shovar",
+    "ShovarNumber",
+    "SlipNumber"
+  ]);
+}
+
+function extractZCreditToken(body) {
+  return pickFirst(body, [
+    "Token",
+    "ZCreditToken",
+    "CardToken",
+    "CardTokenId"
+  ]);
+}
+
+function extractZCreditPaymentMethod(body) {
+  return pickFirst(body, [
+    "PaymentMethod",
+    "ZCreditPaymentMethod",
+    "PaymentType",
+    "WalletType",
+    "CardEntryMode",
+    "EntryMode"
+  ]);
+}
+
+function detectCreditEntryType(body) {
+  const method = String(extractZCreditPaymentMethod(body) || "").trim();
+
+  // Known from live ZCredit callbacks:
+  // 0 = regular credit card / manual card entry
+  // 6 = Google Pay
+  if (method === "0") return "regular_credit";
+  if (method === "6") return "google_pay";
+
+  const raw = [
+    method,
+    pickFirst(body, [
+      "WalletType", "Wallet", "DigitalWallet", "CardWallet",
+      "CardEntryMode", "EntryMode", "PaymentType",
+      "CardInputType", "TokenType", "Issuer", "Eci", "ECI"
+    ]),
+    findValueByKeyIncludes(body, ["wallet", "entry", "method", "apple", "google", "digital", "token", "eci"])
+  ].filter(Boolean).join(" | ");
+
+  const s = raw.toLowerCase();
+
+  if (s.includes("apple")) return "apple_pay";
+  if (s.includes("google")) return "google_pay";
+  if (s.includes("wallet") || s.includes("digital")) return "digital_wallet";
+  if (s.includes("manual") || s.includes("typed") || s.includes("keyed")) return "manual_card";
+  if (s.includes("credit")) return "regular_credit";
+
+  return method ? `unknown_${method}` : (raw || "unknown");
+}
+
+function detectCardBrand(body) {
+  const cardName = String(body.CardName || "").toLowerCase();
+  const cardBin = cleanDigits(body.CardBin || "");
+  const brandCode = String(body.CardBrandCode || "").trim();
+
+  if (cardName.includes("visa") || cardName.includes("ויזה")) return "visa";
+  if (cardName.includes("master") || cardName.includes("מסטר")) return "mastercard";
+  if (cardName.includes("amex") || cardName.includes("american") || cardName.includes("אמריקן")) return "amex";
+  if (cardName.includes("diners") || cardName.includes("דיינרס")) return "diners";
+  if (cardName.includes("ישראכרט")) return "isracard";
+
+  if (cardBin.startsWith("4")) return "visa";
+  if (cardBin.startsWith("5")) return "mastercard";
+  if (cardBin.startsWith("34") || cardBin.startsWith("37")) return "amex";
+  if (cardBin.startsWith("30") || cardBin.startsWith("36") || cardBin.startsWith("38")) return "diners";
+
+  return brandCode ? `code_${brandCode}` : "";
 }
 
 /* ================= GOOGLE ================= */
@@ -142,7 +213,7 @@ function getSheets() {
 async function saveToSheet(data) {
   const sheets = getSheets();
 
-  // New schema A:X
+  // Schema A:AH
   // A  Token
   // B  OrderId
   // C  OrderDateTime
@@ -166,11 +237,21 @@ async function saveToSheet(data) {
   // U  MailSent
   // V  Error
   // W  CreditLast4
-  // X  CreditEntryType
+  // X  VoucherNumber
+  // Y  ZCreditPaymentMethod
+  // Z  CreditEntryType
+  // AA ZCreditToken
+  // AB CardBrandCode
+  // AC CardBrand
+  // AD CardName
+  // AE CardBin
+  // AF CardIssuerCode
+  // AG CardFinancerCode
+  // AH Source
 
   await sheets.spreadsheets.values.append({
     spreadsheetId: GOOGLE_SHEET_ID,
-    range: "payments!A:X",
+    range: "payments!A:AH",
     valueInputOption: "RAW",
     requestBody: {
       values: [[
@@ -197,7 +278,17 @@ async function saveToSheet(data) {
         String(data.mailSent || ""),
         String(data.error || ""),
         String(data.last4 || ""),
-        String(data.creditEntryType || "")
+        String(data.voucherNumber || ""),
+        String(data.zcreditPaymentMethod || ""),
+        String(data.creditEntryType || ""),
+        String(data.zcreditToken || ""),
+        String(data.cardBrandCode || ""),
+        String(data.cardBrand || ""),
+        String(data.cardName || ""),
+        String(data.cardBin || ""),
+        String(data.cardIssuerCode || ""),
+        String(data.cardFinancerCode || ""),
+        String(data.source || "")
       ]]
     }
   });
@@ -311,9 +402,14 @@ async function createSession({ orderId, amount, name, phone, source }) {
     throw new Error("ZCredit returned invalid JSON");
   }
 
-  console.log("ZCredit response:", JSON.stringify(data));
-
   const sessionUrl = data?.Data?.SessionUrl || data?.SessionUrl;
+
+  console.log("ZCredit session created:", {
+    ok: response.ok,
+    hasError: !!data?.HasError,
+    sessionId: data?.Data?.SessionId || "",
+    hasSessionUrl: !!sessionUrl
+  });
 
   if (!response.ok || !sessionUrl) {
     throw new Error("ZCredit failed: " + JSON.stringify(data));
@@ -443,19 +539,6 @@ function extractOrderIdFromUniqueId(uniqueId) {
   return match ? match[1] : "";
 }
 
-function extractLast4(body) {
-  const raw =
-    body.CardNum ||
-    body.CardMask ||
-    body.CardNumber ||
-    body.Pan ||
-    body.PAN ||
-    "";
-
-  const d = cleanDigits(raw);
-  return d.length >= 4 ? d.slice(-4) : "";
-}
-
 async function processCallback(body) {
   try {
     console.log("ZCredit callback body:", JSON.stringify(body, null, 2));
@@ -475,10 +558,6 @@ async function processCallback(body) {
       return;
     }
 
-    const email = extractEmail(body);
-    const customerIdNumber = extractCustomerIdNumber(body);
-    const creditEntryType = detectCreditEntryType(body);
-
     const paymentData = {
       token: uniqueId,
       orderId:
@@ -489,10 +568,11 @@ async function processCallback(body) {
       orderDateTime: "",
       name: rec.name || String(body.CustomerName || body.Name || "").trim(),
       phone: rec.phone || normalizePhoneLocal(body.CustomerPhone || body.Phone || ""),
-      email,
-      customerIdNumber,
+      email: extractEmail(body),
+      customerIdNumber: extractCustomerIdNumber(body),
       amount: rec.amount || body.Total || "",
       approval,
+      voucherNumber: extractVoucherNumber(body),
       paymentDate: getNowIsrael(),
       documentType: "receipt",
       paymentMethod: "credit",
@@ -506,7 +586,15 @@ async function processCallback(body) {
       mailSent: "",
       error: "",
       last4: extractLast4(body),
-      creditEntryType,
+      zcreditPaymentMethod: extractZCreditPaymentMethod(body),
+      creditEntryType: detectCreditEntryType(body),
+      zcreditToken: extractZCreditToken(body),
+      cardBrandCode: String(body.CardBrandCode || ""),
+      cardBrand: detectCardBrand(body),
+      cardName: String(body.CardName || ""),
+      cardBin: cleanDigits(body.CardBin || ""),
+      cardIssuerCode: String(body.CardIssuerCode || ""),
+      cardFinancerCode: String(body.CardFinancerCode || ""),
       source: rec.source || "unknown"
     };
 
