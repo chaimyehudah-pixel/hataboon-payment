@@ -37,6 +37,59 @@ function normalizePhone972(phone) {
   return p;
 }
 
+function normalizeSource(source) {
+  const s = String(source || "").trim().toLowerCase();
+  if (s === "payment_request" || s === "pr" || s === "proforma") return "payment_request";
+  if (s === "new_order_system") return "new_order_system";
+  if (s === "manual_payment_link" || s === "payment_link" || s === "manual" || !s) return "manual_payment_link";
+  return s;
+}
+
+function sourceFromUniqueId(uniqueId) {
+  const s = String(uniqueId || "");
+  if (s.startsWith("pr-order-")) return "payment_request";
+  if (s.startsWith("order-")) return "manual_payment_link";
+  return "";
+}
+
+function tokenPrefixForSource(source) {
+  return normalizeSource(source) === "payment_request" ? "pr-order" : "order";
+}
+
+function escapeHtml(v) {
+  return String(v || "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+function getSourceLabel(source) {
+  return normalizeSource(source) === "payment_request" ? "תשלום עבור חשבון עסקה" : "תשלום רגיל להזמנה";
+}
+
+function getCartDescription(orderId, source) {
+  return normalizeSource(source) === "payment_request"
+    ? "תשלום עבור חשבון עסקה להזמנה " + orderId
+    : "תשלום להזמנה " + orderId;
+}
+
+function getSuccessUrl(cleanOrderId, source) {
+  return BASE_URL +
+    "/payment-success?orderId=" +
+    encodeURIComponent(cleanOrderId) +
+    "&source=" +
+    encodeURIComponent(normalizeSource(source));
+}
+
+function getCancelUrl(cleanOrderId, source) {
+  return BASE_URL +
+    "/payment-cancel?orderId=" +
+    encodeURIComponent(cleanOrderId) +
+    "&source=" +
+    encodeURIComponent(normalizeSource(source));
+}
+
 function getNowIsrael() {
   return new Date().toLocaleString("he-IL", {
     timeZone: "Asia/Jerusalem"
@@ -213,7 +266,7 @@ function getSheets() {
 async function saveToSheet(data) {
   const sheets = getSheets();
 
-  // Schema A:AH
+  // Schema A:AI
   // A  Token
   // B  OrderId
   // C  OrderDateTime
@@ -248,10 +301,11 @@ async function saveToSheet(data) {
   // AF CardIssuerCode
   // AG CardFinancerCode
   // AH Source
+  // AI PaymentRequestMatched
 
   await sheets.spreadsheets.values.append({
     spreadsheetId: GOOGLE_SHEET_ID,
-    range: "payments!A:AH",
+    range: "payments!A:AI",
     valueInputOption: "RAW",
     requestBody: {
       values: [[
@@ -288,7 +342,8 @@ async function saveToSheet(data) {
         String(data.cardBin || ""),
         String(data.cardIssuerCode || ""),
         String(data.cardFinancerCode || ""),
-        String(data.source || "")
+        String(normalizeSource(data.source || "")),
+        String(data.paymentRequestMatched || "")
       ]]
     }
   });
@@ -302,6 +357,7 @@ async function createSession({ orderId, amount, name, phone, source }) {
   const customerName = String(name || "").trim();
   const phone972 = normalizePhone972(phone);
   const phoneLocal = normalizePhoneLocal(phone);
+  const normalizedSource = normalizeSource(source);
 
   if (!BASE_URL || !ZC_KEY || !ZC_TERMINAL || !ZC_PASSWORD) {
     throw new Error("Missing payment server configuration");
@@ -324,7 +380,8 @@ async function createSession({ orderId, amount, name, phone, source }) {
   }
 
   const uniqueId =
-    "order-" +
+    tokenPrefixForSource(normalizedSource) +
+    "-" +
     cleanOrderId +
     "-" +
     Date.now() +
@@ -337,7 +394,7 @@ async function createSession({ orderId, amount, name, phone, source }) {
     name: customerName,
     phone: phoneLocal,
     amount: amountNumber,
-    source: source || "manual_payment_link",
+    source: normalizedSource,
     saved: false
   });
 
@@ -348,14 +405,8 @@ async function createSession({ orderId, amount, name, phone, source }) {
     UniqueID: uniqueId,
     CallBackUrl: BASE_URL + "/zc-callback",
     CallbackUrl: BASE_URL + "/zc-callback",
-    SuccessUrl:
-      BASE_URL +
-      "/payment-success?orderId=" +
-      encodeURIComponent(cleanOrderId),
-    CancelUrl:
-      BASE_URL +
-      "/payment-cancel?orderId=" +
-      encodeURIComponent(cleanOrderId),
+    SuccessUrl: getSuccessUrl(cleanOrderId, normalizedSource),
+    CancelUrl: getCancelUrl(cleanOrderId, normalizedSource),
     Total: amountNumber,
     Currency: "ILS",
     AdditionalText: cleanOrderId,
@@ -366,7 +417,7 @@ async function createSession({ orderId, amount, name, phone, source }) {
     },
     CartItems: [
       {
-        Description: "תשלום להזמנה " + cleanOrderId,
+        Description: getCartDescription(cleanOrderId, normalizedSource),
         Quantity: 1,
         UnitPrice: amountNumber,
         Amount: amountNumber,
@@ -380,6 +431,7 @@ async function createSession({ orderId, amount, name, phone, source }) {
     amount: amountNumber,
     name: customerName,
     phone: phone972,
+    source: normalizedSource,
     callback: payload.CallBackUrl
   });
 
@@ -420,14 +472,19 @@ async function createSession({ orderId, amount, name, phone, source }) {
 
 /* ================= UI ================= */
 
-function payPage({ orderId, amount, phone }) {
+function payPage({ orderId, amount, phone, source }) {
+  const normalizedSource = normalizeSource(source);
+  const title = getSourceLabel(normalizedSource);
+  const safeOrderId = escapeHtml(orderId);
+  const safeAmount = escapeHtml(amount);
+  const safePhone = escapeHtml(phone || "");
   return `
 <!doctype html>
 <html lang="he" dir="rtl">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>תשלום להזמנה</title>
+<title>${title}</title>
 <style>
 body{font-family:Arial;background:#f4f4f4;text-align:center;padding:30px}
 .box{background:white;max-width:460px;margin:auto;padding:25px;border-radius:14px}
@@ -439,19 +496,19 @@ button{background:#159947;color:white;border:0;border-radius:8px;cursor:pointer;
 </head>
 <body>
 <div class="box">
-<h2>תשלום להזמנה ${orderId}</h2>
+<h2>${title}</h2>
 
 <div class="info">
-<div><b>מספר הזמנה:</b> ${orderId}</div>
-<div><b>סכום:</b> ₪${amount}</div>
-${phone ? `<div><b>טלפון:</b> ${phone}</div>` : ""}
+<div><b>מספר הזמנה:</b> ${safeOrderId}</div>
+<div><b>סכום:</b> ₪${safeAmount}</div>
+${safePhone ? `<div><b>טלפון:</b> ${safePhone}</div>` : ""}
 </div>
 
 <form method="POST" action="/create-session">
-<input type="hidden" name="orderId" value="${orderId}">
-<input type="hidden" name="amount" value="${amount}">
-<input type="hidden" name="phone" value="${phone || ""}">
-<input type="hidden" name="source" value="manual_payment_link">
+<input type="hidden" name="orderId" value="${safeOrderId}">
+<input type="hidden" name="amount" value="${safeAmount}">
+<input type="hidden" name="phone" value="${safePhone}">
+<input type="hidden" name="source" value="${normalizedSource}">
 
 <input name="name" placeholder="שם מלא" required autocomplete="name">
 
@@ -480,6 +537,28 @@ app.get("/health", (req, res) => {
   });
 });
 
+
+app.get("/pay/:phone/:orderId/:amount/pr", (req, res) => {
+  const phone = normalizePhoneLocal(req.params.phone);
+  const orderId = cleanDigits(req.params.orderId);
+  const amount = Number(String(req.params.amount || "").replace(",", "."));
+
+  if (!orderId) return res.status(400).send("מספר הזמנה לא תקין");
+  if (!amount || amount <= 0) return res.status(400).send("סכום לא תקין");
+
+  res.send(payPage({ orderId, amount, phone, source: "payment_request" }));
+});
+
+app.get("/pay/:orderId/:amount/pr", (req, res) => {
+  const orderId = cleanDigits(req.params.orderId);
+  const amount = Number(String(req.params.amount || "").replace(",", "."));
+
+  if (!orderId) return res.status(400).send("מספר הזמנה לא תקין");
+  if (!amount || amount <= 0) return res.status(400).send("סכום לא תקין");
+
+  res.send(payPage({ orderId, amount, phone: "", source: "payment_request" }));
+});
+
 app.get("/pay/:phone/:orderId/:amount", (req, res) => {
   const phone = normalizePhoneLocal(req.params.phone);
   const orderId = cleanDigits(req.params.orderId);
@@ -488,7 +567,7 @@ app.get("/pay/:phone/:orderId/:amount", (req, res) => {
   if (!orderId) return res.status(400).send("מספר הזמנה לא תקין");
   if (!amount || amount <= 0) return res.status(400).send("סכום לא תקין");
 
-  res.send(payPage({ orderId, amount, phone }));
+  res.send(payPage({ orderId, amount, phone, source: "manual_payment_link" }));
 });
 
 app.get("/pay/:orderId/:amount", (req, res) => {
@@ -498,7 +577,7 @@ app.get("/pay/:orderId/:amount", (req, res) => {
   if (!orderId) return res.status(400).send("מספר הזמנה לא תקין");
   if (!amount || amount <= 0) return res.status(400).send("סכום לא תקין");
 
-  res.send(payPage({ orderId, amount, phone: "" }));
+  res.send(payPage({ orderId, amount, phone: "", source: "manual_payment_link" }));
 });
 
 app.post("/create-session", async (req, res) => {
@@ -535,7 +614,7 @@ app.post("/create-order-session", async (req, res) => {
 /* ================= CALLBACK ================= */
 
 function extractOrderIdFromUniqueId(uniqueId) {
-  const match = String(uniqueId || "").match(/^order-(\d+)-/);
+  const match = String(uniqueId || "").match(/^(?:pr-order|order)-(\d+)-/);
   return match ? match[1] : "";
 }
 
@@ -552,6 +631,13 @@ async function processCallback(body) {
     }
 
     const rec = receipts.get(uniqueId) || {};
+    const callbackSource = normalizeSource(
+      rec.source ||
+      sourceFromUniqueId(uniqueId) ||
+      body.Source ||
+      body.source ||
+      "manual_payment_link"
+    );
 
     if (rec.saved) {
       console.log("callback duplicate ignored:", uniqueId);
@@ -577,7 +663,7 @@ async function processCallback(body) {
       documentType: "receipt",
       paymentMethod: "credit",
       subject: "",
-      remarks: rec.source || "manual_payment_link",
+      remarks: callbackSource,
       linkedDocumentToken: "",
       linkedDocumentNumber: "",
       documentNumber: "",
@@ -595,7 +681,8 @@ async function processCallback(body) {
       cardBin: cleanDigits(body.CardBin || ""),
       cardIssuerCode: String(body.CardIssuerCode || ""),
       cardFinancerCode: String(body.CardFinancerCode || ""),
-      source: rec.source || "unknown"
+      source: callbackSource,
+      paymentRequestMatched: ""
     };
 
     console.log("parsed payment data for sheet:", JSON.stringify(paymentData, null, 2));
@@ -628,13 +715,15 @@ app.all("/zc-callback", (req, res) => {
 
 app.get("/payment-success", (req, res) => {
   const orderId = cleanDigits(req.query.orderId || "");
+  const source = normalizeSource(req.query.source || "");
+  const title = source === "payment_request" ? "התשלום עבור חשבון העסקה עבר בהצלחה" : "התשלום עבר בהצלחה";
 
   res.send(`
 <!doctype html>
 <html lang="he" dir="rtl">
 <head><meta charset="utf-8"><title>התשלום עבר</title></head>
 <body style="font-family:Arial;text-align:center;margin-top:80px">
-<h1>✅ התשלום עבר בהצלחה</h1>
+<h1>✅ ${title}</h1>
 ${orderId ? `<h2>מספר הזמנה: ${orderId}</h2>` : ""}
 </body>
 </html>
@@ -643,13 +732,15 @@ ${orderId ? `<h2>מספר הזמנה: ${orderId}</h2>` : ""}
 
 app.get("/payment-cancel", (req, res) => {
   const orderId = cleanDigits(req.query.orderId || "");
+  const source = normalizeSource(req.query.source || "");
+  const title = source === "payment_request" ? "התשלום עבור חשבון העסקה בוטל" : "התשלום בוטל";
 
   res.send(`
 <!doctype html>
 <html lang="he" dir="rtl">
 <head><meta charset="utf-8"><title>התשלום בוטל</title></head>
 <body style="font-family:Arial;text-align:center;margin-top:80px">
-<h1>❌ התשלום בוטל</h1>
+<h1>❌ ${title}</h1>
 ${orderId ? `<h2>מספר הזמנה: ${orderId}</h2>` : ""}
 </body>
 </html>
