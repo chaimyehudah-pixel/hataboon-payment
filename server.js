@@ -197,8 +197,10 @@ function detectCreditEntryType(body) {
 
   // Known from live ZCredit callbacks:
   // 0 = regular credit card / manual card entry
+  // 4 = Apple Pay
   // 6 = Google Pay
   if (method === "0") return "regular_credit";
+  if (method === "4") return "apple_pay";
   if (method === "6") return "google_pay";
 
   const raw = [
